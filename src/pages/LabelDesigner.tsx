@@ -1,0 +1,974 @@
+import { useState, useRef, useEffect, useCallback } from 'react'
+import { Eye, EyeOff, Save, RotateCcw, Move, ChevronUp, ChevronDown, Trash2, Plus, Type, Minus, QrCode, Loader2 } from 'lucide-react'
+import { supabase } from '../lib/supabase'
+
+// ── Types ─────────────────────────────────────────────────────────────────────
+export interface FieldConfig {
+  id: string
+  label: string          // ชื่อที่แสดงใน designer
+  sampleValue: string    // ข้อความตัวอย่างใน preview
+  x: number              // mm จากซ้าย
+  y: number              // mm จากบน
+  w: number              // mm ความกว้าง
+  h: number              // mm ความสูง
+  fontSize: number       // pt
+  fontWeight: string     // '400' | '700' | '900'
+  align: 'left' | 'center' | 'right'
+  visible: boolean
+  type: 'text' | 'qr' | 'separator' | 'weight'
+  border: boolean
+  italic: boolean
+}
+
+export interface LabelLayout {
+  labelW: number   // mm
+  labelH: number   // mm
+  fields: FieldConfig[]
+  removedIds?: string[]   // ฟิลด์ default ที่ผู้ใช้ "ลบทิ้ง" — กันถูกเติมกลับตอนโหลด
+}
+
+// ── Constants ─────────────────────────────────────────────────────────────────
+const SCALE   = 5.0   // px per mm (for canvas display — ใหญ่ขึ้นเพื่ออ่านง่าย)
+const LABEL_W = 165   // mm
+const LABEL_H = 70    // mm
+const LS_KEY  = 'bwp_label_layout_long'
+
+// ── DEFAULT — map จาก longHtml เดิมแบบแม่นยำ ────────────────────────────────
+// ใบ 165×70mm, wrap padding: 1.5mm บน/ล่าง, 3mm ซ้าย/ขวา
+// .title  → y=1.5, h≈6.5  (11pt/800, border-bottom 2px)
+// .hdr    → y=8.5, h≈5    (3 flex cols: 1 / 1.4 / 0.7, border-bottom 1px)
+// .body   → y=14, h=54.5  (.L flex:1.5 w≈95mm | .R flex:1 w≈64mm)
+// .L top: prodcode y=14, prodname y=19   .L bottom (space-between): machine y=55, core y=59.5, size y=64
+// .R top: lotno y=14, length y=18.5, gross y=23.5, net y=28.5
+// .R bottom (auto): barcode_lbl y=58, sep_bc y=61, inspector y=64.5, qr y=49.5
+export const DEFAULT_LAYOUT: LabelLayout = {
+  labelW: LABEL_W,
+  labelH: LABEL_H,
+  fields: [
+    // ─ Title ──────────────────────────────────────────────────────────────
+    { id:'header', label:'หัวกระดาษ (ชื่อบริษัท)',
+      sampleValue:'บริษัท เบสท์เวิลด์ อินเตอร์พลาส จำกัด',
+      x:2,   y:1.5, w:161, h:6.5,
+      fontSize:12, fontWeight:'800', align:'center',
+      visible:true, type:'text', border:true, italic:false },
+
+    // ─ Hdr row: 3 cols ────────────────────────────────────────────────────
+    { id:'mat', label:'Mat Code',
+      sampleValue:'Mat Code  P-001',
+      x:3,   y:8.5, w:51, h:5,
+      fontSize:9, fontWeight:'700', align:'left',
+      visible:true, type:'text', border:true, italic:false },
+    { id:'mfg', label:'MFG Date',
+      sampleValue:'MFG Date  19/05/69',
+      x:55,  y:8.5, w:72, h:5,
+      fontSize:9, fontWeight:'700', align:'center',
+      visible:true, type:'text', border:true, italic:false },
+    { id:'rollno', label:'Roll No',
+      sampleValue:'Roll No.  #5',
+      x:128, y:8.5, w:34, h:5,
+      fontSize:9, fontWeight:'700', align:'right',
+      visible:true, type:'text', border:true, italic:false },
+
+    // ─ LEFT column top ────────────────────────────────────────────────────
+    { id:'prodcode', label:'Product Code',
+      sampleValue:'Product Code  Ldpe70%pcr...',
+      x:3, y:14, w:92, h:5,
+      fontSize:9, fontWeight:'700', align:'left',
+      visible:true, type:'text', border:false, italic:false },
+    { id:'prodname', label:'Product Name',
+      sampleValue:'LDPE ใส',
+      x:3, y:19, w:92, h:7,
+      fontSize:11, fontWeight:'800', align:'left',
+      visible:true, type:'text', border:false, italic:false },
+
+    // ─ LEFT column bottom ─────────────────────────────────────────────────
+    { id:'machine', label:'เครื่อง',
+      sampleValue:'เครื่อง  M-01',
+      x:3, y:54, w:92, h:5,
+      fontSize:8.5, fontWeight:'700', align:'left',
+      visible:true, type:'text', border:false, italic:false },
+    { id:'core', label:'Core Weight',
+      sampleValue:'Core Weight  1.50',
+      x:3, y:59, w:92, h:5,
+      fontSize:8.5, fontWeight:'700', align:'left',
+      visible:true, type:'text', border:false, italic:false },
+    { id:'size', label:'Size (กว้าง × หนา)',
+      sampleValue:'Size  120 cm × 40 mc',
+      x:3, y:64, w:92, h:5,
+      fontSize:9.5, fontWeight:'700', align:'left',
+      visible:true, type:'text', border:false, italic:false },
+
+    // ─ Vertical separator L|R ─────────────────────────────────────────────
+    { id:'vsep', label:'เส้นแบ่งซ้าย|ขวา',
+      sampleValue:'',
+      x:98.4, y:14, w:0.5, h:55,
+      fontSize:8, fontWeight:'400', align:'left',
+      visible:true, type:'separator', border:false, italic:false },
+
+    // ─ RIGHT column top ───────────────────────────────────────────────────
+    { id:'lotno', label:'Lot No',
+      sampleValue:'Lot No  L240519-01',
+      x:101, y:14, w:61, h:5,
+      fontSize:9, fontWeight:'700', align:'left',
+      visible:true, type:'text', border:false, italic:false },
+    { id:'length', label:'ความยาว / Pcs',
+      sampleValue:'Length  500  M.    Pcs.',
+      x:101, y:19, w:61, h:5,
+      fontSize:9, fontWeight:'700', align:'left',
+      visible:true, type:'text', border:false, italic:false },
+    { id:'gross', label:'Gross Weight',
+      sampleValue:'Gross Weight  27.00 Kgs.',
+      x:101, y:24.5, w:61, h:5,
+      fontSize:8.5, fontWeight:'700', align:'left',
+      visible:true, type:'text', border:true, italic:false },
+    { id:'net', label:'Net Weight',
+      sampleValue:'25.50',
+      x:101, y:30, w:61, h:8,
+      fontSize:15, fontWeight:'900', align:'left',
+      visible:true, type:'weight', border:false, italic:false },
+
+    // ─ RIGHT column bottom ────────────────────────────────────────────────
+    { id:'barcode_lbl', label:'Barcode No. (ป้าย)',
+      sampleValue:'Barcode No.',
+      x:101, y:57, w:41, h:3.5,
+      fontSize:8, fontWeight:'400', align:'left',
+      visible:true, type:'text', border:false, italic:false },
+    { id:'sep_bc', label:'เส้น Barcode (bcno)',
+      sampleValue:'',
+      x:101, y:61, w:24, h:0,
+      fontSize:8, fontWeight:'400', align:'left',
+      visible:true, type:'separator', border:false, italic:false },
+    { id:'inspector', label:'ผู้ตรวจสอบ',
+      sampleValue:'ผู้ตรวจสอบ  นาย ทดสอบ ระบบ',
+      x:101, y:64, w:41, h:4.5,
+      fontSize:9, fontWeight:'700', align:'left',
+      visible:true, type:'text', border:false, italic:false },
+
+    // ─ QR ─────────────────────────────────────────────────────────────────
+    { id:'qr', label:'QR Code',
+      sampleValue:'QR',
+      x:143, y:49.5, w:19, h:19,
+      fontSize:8, fontWeight:'400', align:'center',
+      visible:true, type:'qr', border:false, italic:false },
+  ],
+}
+
+// ── DEFAULT — ใบสั้น 76×76 mm ────────────────────────────────────────────────
+const SHORT_W = 76
+const SHORT_H = 76
+export const DEFAULT_LAYOUT_SHORT: LabelLayout = {
+  labelW: SHORT_W,
+  labelH: SHORT_H,
+  fields: [
+    // ── หัวกระดาษ (กล่องมีขอบ) ──
+    { id:'header', label:'หัวกระดาษ (ชื่อบริษัท)',
+      sampleValue:'บริษัท เบสท์เวิลด์ อินเตอร์พลาส จำกัด',
+      x:2, y:1.5, w:72, h:6,
+      fontSize:9, fontWeight:'800', align:'center',
+      visible:true, type:'text', border:true, italic:false },
+
+    // ── แถว Mat / MFG / Roll ──
+    { id:'mat', label:'Mat Code',
+      sampleValue:'Mat  P-001',
+      x:2, y:8.5, w:28, h:4.5,
+      fontSize:8, fontWeight:'700', align:'left',
+      visible:true, type:'text', border:false, italic:false },
+    { id:'mfg', label:'MFG Date',
+      sampleValue:'MFG  19/05/69',
+      x:28, y:8.5, w:26, h:4.5,
+      fontSize:8, fontWeight:'700', align:'center',
+      visible:true, type:'text', border:false, italic:false },
+    { id:'rollno', label:'Roll No',
+      sampleValue:'Roll #5',
+      x:54, y:8.5, w:20, h:4.5,
+      fontSize:8, fontWeight:'700', align:'right',
+      visible:true, type:'text', border:false, italic:false },
+    { id:'sep1', label:'เส้นคั่น 1', sampleValue:'',
+      x:2, y:13.3, w:72, h:0, fontSize:8, fontWeight:'400', align:'left',
+      visible:true, type:'separator', border:false, italic:false },
+
+    // ── Product Name — เต็มความกว้าง 2 บรรทัด (รองรับชื่อยาว) ──
+    { id:'prodname', label:'ชื่อสินค้า', sampleValue:'SWF PET 1.95L 80MC 500MM (RED SHRINK)',
+      x:2, y:14.3, w:72, h:8, fontSize:10, fontWeight:'800', align:'left',
+      visible:true, type:'text', border:false, italic:false },
+
+    // ── Product Code (เหมือนใบยาว — ใบยาวไม่มี Item Code) ──
+    { id:'lbl_prodcode', label:'ป้าย Product Code', sampleValue:'Product Code',
+      x:2, y:22.5, w:24, h:4.5, fontSize:8, fontWeight:'700', align:'left',
+      visible:true, type:'text', border:false, italic:false },
+    { id:'prodcode', label:'รหัสสินค้า', sampleValue:'HAD044',
+      x:26, y:22.5, w:48, h:4.5, fontSize:8.5, fontWeight:'800', align:'right',
+      visible:true, type:'text', border:false, italic:false },
+
+    { id:'lbl_size', label:'ป้าย Size', sampleValue:'Size',
+      x:2, y:27, w:24, h:4.5, fontSize:8, fontWeight:'700', align:'left',
+      visible:true, type:'text', border:false, italic:false },
+    { id:'size', label:'Size', sampleValue:'120 cm × 40 mc',
+      x:26, y:27, w:48, h:4.5, fontSize:8.5, fontWeight:'800', align:'right',
+      visible:true, type:'text', border:false, italic:false },
+
+    { id:'lbl_lot', label:'ป้าย Lot No', sampleValue:'Lot No',
+      x:2, y:31.5, w:24, h:4.5, fontSize:8, fontWeight:'700', align:'left',
+      visible:true, type:'text', border:false, italic:false },
+    { id:'lotno', label:'Lot No', sampleValue:'L240519-01',
+      x:26, y:31.5, w:48, h:4.5, fontSize:8.5, fontWeight:'800', align:'right',
+      visible:true, type:'text', border:false, italic:false },
+
+    { id:'lbl_length', label:'ป้าย Length', sampleValue:'Length',
+      x:2, y:36, w:24, h:4.5, fontSize:8, fontWeight:'700', align:'left',
+      visible:true, type:'text', border:false, italic:false },
+    { id:'length', label:'Length / Pcs', sampleValue:'500 M.',
+      x:26, y:36, w:48, h:4.5, fontSize:8.5, fontWeight:'800', align:'right',
+      visible:true, type:'text', border:false, italic:false },
+
+    { id:'sep2', label:'เส้นคั่น 2', sampleValue:'',
+      x:2, y:40.8, w:72, h:0, fontSize:8, fontWeight:'400', align:'left',
+      visible:true, type:'separator', border:false, italic:false },
+
+    // ── เครื่อง / Core ──
+    { id:'machine', label:'เครื่อง', sampleValue:'เครื่อง  M-01',
+      x:2, y:41, w:36, h:4, fontSize:8, fontWeight:'700', align:'left',
+      visible:true, type:'text', border:false, italic:false },
+    { id:'core', label:'Core Weight', sampleValue:'Core  1.50 Kg',
+      x:38, y:41, w:36, h:4, fontSize:8, fontWeight:'700', align:'right',
+      visible:true, type:'text', border:false, italic:false },
+
+    { id:'sep3', label:'เส้นคั่น 3', sampleValue:'',
+      x:2, y:45.3, w:72, h:0, fontSize:8, fontWeight:'400', align:'left',
+      visible:true, type:'separator', border:false, italic:false },
+
+    // ── Net Weight (ตัวใหญ่) + Gross + QR ──
+    { id:'net', label:'Net Weight', sampleValue:'25.50',
+      x:2, y:46, w:40, h:12, fontSize:22, fontWeight:'900', align:'left',
+      visible:true, type:'weight', border:false, italic:false },
+    { id:'gross', label:'Gross Weight', sampleValue:'Gross 27.00 Kgs.',
+      x:2, y:58.5, w:40, h:4, fontSize:8, fontWeight:'700', align:'left',
+      visible:true, type:'text', border:false, italic:false },
+    { id:'qr', label:'QR Code', sampleValue:'QR',
+      x:53, y:46, w:21, h:21, fontSize:7, fontWeight:'400', align:'center',
+      visible:true, type:'qr', border:false, italic:false },
+
+    { id:'sep4', label:'เส้นคั่น 4', sampleValue:'',
+      x:2, y:67, w:72, h:0, fontSize:8, fontWeight:'400', align:'left',
+      visible:true, type:'separator', border:false, italic:false },
+
+    // ── ผู้ตรวจ ──
+    { id:'inspector', label:'ผู้ตรวจสอบ', sampleValue:'ผู้ตรวจ: นาย ทดสอบ',
+      x:2, y:68, w:72, h:5, fontSize:9, fontWeight:'800', align:'left',
+      visible:true, type:'text', border:false, italic:false },
+  ],
+}
+
+// ── Persistence — Supabase ────────────────────────────────────────────────────
+// ── DEFAULT — Waste Label 100×100 mm ──────────────────────────────────────────
+const WASTE_W = 76
+const WASTE_H = 76
+export const DEFAULT_LAYOUT_WASTE: LabelLayout = {
+  labelW: WASTE_W,
+  labelH: WASTE_H,
+  fields: [
+    // ── หัว ──
+    // ── หัว ──
+    { id:'header', label:'หัวกระดาษ (ชื่อบริษัท)',
+      sampleValue:'บริษัท เบสท์เวิลด์ อินเตอร์พลาส จำกัด',
+      x:2, y:1.5, w:72, h:5, fontSize:9, fontWeight:'900', align:'center',
+      visible:true, type:'text', border:true, italic:false },
+    { id:'waste_tag', label:'WASTE LABEL tag',
+      sampleValue:'WASTE LABEL  ใบปะหน้า สิ่งปฏิกูล',
+      x:2, y:7.5, w:54, h:3.5, fontSize:7, fontWeight:'700', align:'left',
+      visible:true, type:'text', border:false, italic:false },
+    { id:'rollno', label:'Roll No',
+      sampleValue:'Roll #1',
+      x:56, y:7.5, w:18, h:3.5, fontSize:7.5, fontWeight:'900', align:'right',
+      visible:true, type:'text', border:false, italic:false },
+    { id:'sep_top', label:'เส้นคั่น หัว', sampleValue:'', x:2, y:11.5, w:72, h:0, fontSize:8, fontWeight:'400', align:'left', visible:true, type:'separator', border:false, italic:false },
+
+    // ── 4 ช่อง (2×2) ──
+    { id:'waste_name_lbl', label:'ป้าย: ชื่อสิ่งปฏิกูล',
+      sampleValue:'ชื่อสิ่งปฏิกูล',
+      x:2, y:12.5, w:35, h:3, fontSize:6.5, fontWeight:'700', align:'left',
+      visible:true, type:'text', border:false, italic:false },
+    { id:'wastename', label:'ชื่อสิ่งปฏิกูล (จากการชั่ง)',
+      sampleValue:'เศษพลาสติก',
+      x:2, y:15, w:35, h:5.5, fontSize:11, fontWeight:'900', align:'left',
+      visible:true, type:'text', border:false, italic:false },
+    { id:'sep_v1', label:'เส้นตั้ง 1', sampleValue:'', x:38, y:12.5, w:0, h:9, fontSize:8, fontWeight:'400', align:'left', visible:true, type:'separator', border:false, italic:false },
+    { id:'waste_code_lbl', label:'ป้าย: รหัสสิ่งปฏิกูล',
+      sampleValue:'รหัสสิ่งปฏิกูล',
+      x:40, y:12.5, w:34, h:3, fontSize:6.5, fontWeight:'700', align:'left',
+      visible:true, type:'text', border:false, italic:false },
+    { id:'waste_code', label:'★ รหัสสิ่งปฏิกูล (คงที่)',
+      sampleValue:'120105',
+      x:40, y:15, w:34, h:5.5, fontSize:11, fontWeight:'900', align:'left',
+      visible:true, type:'text', border:false, italic:false },
+    { id:'sep_h1', label:'เส้นคั่น กลาง1', sampleValue:'', x:2, y:22, w:72, h:0, fontSize:8, fontWeight:'400', align:'left', visible:true, type:'separator', border:false, italic:false },
+
+    // ── วันที่ + เหตุผล ── (ตัดช่อง "รหัสการจัดการ" + "ผู้รับดำเนินการ" ออก แล้วเลื่อนขึ้น)
+    { id:'date', label:'วันที่จัดเก็บ',
+      sampleValue:'วันที่:  ___/___/___',
+      x:2, y:22.5, w:35, h:4, fontSize:7.5, fontWeight:'700', align:'left',
+      visible:true, type:'text', border:false, italic:false },
+    { id:'reason', label:'เหตุผล',
+      sampleValue:'เหตุผล: ตัดต่อ',
+      x:39, y:22.5, w:35, h:4, fontSize:7.5, fontWeight:'700', align:'left',
+      visible:true, type:'text', border:false, italic:false },
+    { id:'sep_h3', label:'เส้นคั่น กลาง3', sampleValue:'', x:2, y:27, w:72, h:0, fontSize:8, fontWeight:'400', align:'left', visible:true, type:'separator', border:false, italic:false },
+
+    // ── นน + QR (QR ต้องใหญ่พอสแกนได้ — แนะนำ ≥20mm) ──
+    { id:'net', label:'Net Weight',
+      sampleValue:'25.50',
+      x:2, y:27.5, w:42, h:17, fontSize:22, fontWeight:'900', align:'left',
+      visible:true, type:'weight', border:false, italic:false },
+    { id:'qr', label:'QR Code',
+      sampleValue:'QR',
+      x:45, y:27.5, w:29, h:24, fontSize:7, fontWeight:'400', align:'center',
+      visible:true, type:'qr', border:false, italic:false },
+    { id:'sep_h4', label:'เส้นคั่น กลาง4', sampleValue:'', x:2, y:52, w:72, h:0, fontSize:8, fontWeight:'400', align:'left', visible:true, type:'separator', border:false, italic:false },
+
+    // ── แผนก + ผู้ตรวจ ──
+    { id:'origin', label:'แผนกต้นกำเนิด',
+      sampleValue:'แผนก: เป่า  เครื่อง: BL01',
+      x:2, y:53, w:72, h:3.5, fontSize:7.5, fontWeight:'700', align:'left',
+      visible:true, type:'text', border:false, italic:false },
+    { id:'inspector', label:'ผู้ตรวจสอบ + วันที่',
+      sampleValue:'ผู้ตรวจ: ___________  วันที่: ___/___/___',
+      x:2, y:57, w:72, h:3.5, fontSize:7.5, fontWeight:'700', align:'left',
+      visible:true, type:'text', border:false, italic:false },
+    { id:'sep_h5', label:'เส้นคั่น ท้าย', sampleValue:'', x:2, y:61, w:72, h:0, fontSize:8, fontWeight:'400', align:'left', visible:true, type:'separator', border:false, italic:false },
+
+    // ── Footer ──
+    { id:'footer', label:'หมายเหตุ',
+      sampleValue:'หมายเหตุ : ห้ามผสมของเสียต่างประเภทกัน และห้ามนำของเสียออกนอกพื้นที่โดยไม่ได้รับอนุญาต',
+      x:2, y:62, w:72, h:5.5, fontSize:6, fontWeight:'700', align:'center',
+      visible:true, type:'text', border:true, italic:false },
+  ],
+}
+
+type LabelSize = 'long' | 'short' | 'waste'
+const layoutId = (size: LabelSize) => size === 'short' ? 'short' : size === 'waste' ? 'waste' : 'long'
+
+async function loadLayoutBySize(size: LabelSize): Promise<LabelLayout> {
+  const def = size === 'short' ? DEFAULT_LAYOUT_SHORT : size === 'waste' ? DEFAULT_LAYOUT_WASTE : DEFAULT_LAYOUT
+  try {
+    const { data, error } = await supabase
+      .from('label_layouts').select('layout').eq('id', layoutId(size)).maybeSingle()
+    if (error) { console.warn('[LabelDesigner]', error.message); return def }
+    if (data?.layout) {
+      const parsed = data.layout as LabelLayout
+      const savedIds = new Set(parsed.fields.map((f: FieldConfig) => f.id))
+      const removed  = new Set(parsed.removedIds ?? [])
+      // เติมเฉพาะฟิลด์ default ที่ "เป็นของใหม่จริง" — ไม่ใช่ฟิลด์ที่ผู้ใช้ลบทิ้งไปเอง
+      const missing  = def.fields.filter(f => !savedIds.has(f.id) && !removed.has(f.id))
+      return { ...parsed, fields: [...parsed.fields, ...missing] }
+    }
+    await saveLayoutToDB(def, size)
+  } catch (e) { console.warn('[LabelDesigner]', e) }
+  return def
+}
+
+export const loadLongLayout  = () => loadLayoutBySize('long')
+export const loadShortLayout = () => loadLayoutBySize('short')
+export const loadWasteLayout = () => loadLayoutBySize('waste')
+
+async function saveLayoutToDB(layout: LabelLayout, size: LabelSize): Promise<boolean> {
+  const { error } = await supabase
+    .from('label_layouts')
+    .upsert({ id: layoutId(size), layout, updated_at: new Date().toISOString() },
+             { onConflict: 'id' })
+  if (error) { console.error('[LabelDesigner]', error.message); return false }
+  return true
+}
+
+// ── Main Component ────────────────────────────────────────────────────────────
+export default function LabelDesigner() {
+  const [size, setSize]         = useState<LabelSize>('short')
+  const [layout, setLayout]     = useState<LabelLayout>(DEFAULT_LAYOUT)
+  const [loading, setLoading]   = useState(true)
+  const [selected, setSelected] = useState<string | null>(null)
+  const [savedFlash, setSavedFlash] = useState(false)
+  const dragging = useRef<{ id: string; sx: number; sy: number; ox: number; oy: number } | null>(null)
+  const canvasRef = useRef<HTMLDivElement>(null)
+
+  const fields        = layout.fields
+  const selectedField = fields.find(f => f.id === selected) ?? null
+
+  // ── Undo / Redo history ───────────────────────────────────────────────────
+  const layoutRef = useRef(layout); layoutRef.current = layout
+  const [past, setPast]     = useState<LabelLayout[]>([])
+  const [future, setFuture] = useState<LabelLayout[]>([])
+  const pastRef   = useRef(past);   pastRef.current   = past
+  const futureRef = useRef(future); futureRef.current = future
+
+  // เรียกก่อนแก้ไขทุกครั้ง — เก็บสถานะปัจจุบันลง history
+  const snapshot = useCallback(() => {
+    setPast(p => [...p.slice(-49), layoutRef.current])
+    setFuture([])
+  }, [])
+
+  const undo = useCallback(() => {
+    const p = pastRef.current
+    if (p.length === 0) return
+    const prev = p[p.length - 1]
+    setFuture(f => [layoutRef.current, ...f].slice(0, 50))
+    setPast(p.slice(0, -1))
+    setLayout(prev)
+    setSelected(null)
+  }, [])
+
+  const redo = useCallback(() => {
+    const f = futureRef.current
+    if (f.length === 0) return
+    const next = f[0]
+    setPast(p => [...p, layoutRef.current].slice(-50))
+    setFuture(f.slice(1))
+    setLayout(next)
+    setSelected(null)
+  }, [])
+
+  // คีย์ลัด Ctrl+Z / Ctrl+Shift+Z / Ctrl+Y (รองรับทั้ง e.key และ e.code)
+  useEffect(() => {
+    function onKey(e: KeyboardEvent) {
+      const tag = (e.target as HTMLElement)?.tagName
+      if (tag === 'INPUT' || tag === 'TEXTAREA' || tag === 'SELECT') return
+      if (!(e.ctrlKey || e.metaKey)) return
+      const isZ = e.key === 'z' || e.key === 'Z' || e.code === 'KeyZ'
+      const isY = e.key === 'y' || e.key === 'Y' || e.code === 'KeyY'
+      if (isZ && !e.shiftKey)      { e.preventDefault(); undo() }
+      else if (isY || (isZ && e.shiftKey)) { e.preventDefault(); redo() }
+    }
+    window.addEventListener('keydown', onKey, true)
+    return () => window.removeEventListener('keydown', onKey, true)
+  }, [undo, redo])
+
+  // โหลด layout ตามขนาดที่เลือก
+  useEffect(() => {
+    setLoading(true); setSelected(null)
+    setPast([]); setFuture([])
+    loadLayoutBySize(size).then(l => { setLayout(l); setLoading(false) })
+  }, [size])
+
+  // ── save ──────────────────────────────────────────────────────────────────
+  async function doSave() {
+    setSavedFlash(true)
+    const ok = await saveLayoutToDB(layout, size)
+    if (!ok) {
+      alert('❌ บันทึกไม่สำเร็จ — กรุณาตรวจสอบ Supabase RLS policy')
+      setSavedFlash(false)
+    } else {
+      setTimeout(() => setSavedFlash(false), 2000)
+    }
+  }
+
+  async function doReset() {
+    if (!confirm('รีเซ็ตกลับค่าเริ่มต้น? (layout ที่บันทึกไว้จะหายไป)')) return
+    const def = size === 'short' ? DEFAULT_LAYOUT_SHORT : size === 'waste' ? DEFAULT_LAYOUT_WASTE : DEFAULT_LAYOUT
+    snapshot()
+    setLayout(def)
+    setSelected(null)
+    const ok = await saveLayoutToDB(def, size)
+    if (!ok) alert('❌ บันทึกไม่สำเร็จ — กรุณาตรวจสอบ Supabase RLS policy')
+  }
+
+  // ── add / delete ─────────────────────────────────────────────────────────
+  const [showAddMenu, setShowAddMenu] = useState(false)
+
+  function addField(type: FieldConfig['type']) {
+    const id = `field_${Date.now()}`
+    const base: FieldConfig = {
+      id, label: type === 'separator' ? 'เส้นคั่น' : type === 'qr' ? 'QR Code' : 'ข้อความใหม่',
+      sampleValue: type === 'separator' ? '' : type === 'qr' ? 'QR' : 'ข้อความ',
+      x: 10, y: 10, w: type === 'separator' ? 100 : type === 'qr' ? 20 : 80,
+      h: type === 'separator' ? 0 : type === 'qr' ? 20 : 6,
+      fontSize: 8, fontWeight: '700', align: 'left',
+      visible: true, type, border: false, italic: false,
+    }
+    snapshot()
+    setLayout(prev => ({ ...prev, fields: [...prev.fields, base] }))
+    setSelected(id)
+    setShowAddMenu(false)
+  }
+
+  function deleteField(id: string) {
+    snapshot()
+    setLayout(prev => ({
+      ...prev,
+      fields: prev.fields.filter(f => f.id !== id),
+      // จำว่าฟิลด์นี้ถูกลบ → กันถูกเติมกลับจาก default ตอนโหลดครั้งหน้า
+      removedIds: [...new Set([...(prev.removedIds ?? []), id])],
+    }))
+    setSelected(null)
+  }
+
+  // ── field update helpers ──────────────────────────────────────────────────
+  const updateField = useCallback((id: string, patch: Partial<FieldConfig>) => {
+    snapshot()
+    setLayout(prev => ({ ...prev, fields: prev.fields.map(f => f.id === id ? { ...f, ...patch } : f) }))
+  }, [snapshot])
+
+  function moveOrder(id: string, dir: -1 | 1) {
+    snapshot()
+    setLayout(prev => {
+      const arr = [...prev.fields]
+      const i   = arr.findIndex(f => f.id === id)
+      const j   = i + dir
+      if (j < 0 || j >= arr.length) return prev
+      ;[arr[i], arr[j]] = [arr[j], arr[i]]
+      return { ...prev, fields: arr }
+    })
+  }
+
+  // ── drag & drop ───────────────────────────────────────────────────────────
+  const onMouseDown = useCallback((e: React.MouseEvent, id: string) => {
+    e.preventDefault()
+    e.stopPropagation()
+    setSelected(id)
+    const f = fields.find(f => f.id === id)!
+    snapshot()  // เก็บสถานะก่อนเริ่มลาก → Ctrl+Z ย้อนการลากได้
+    dragging.current = { id, sx: e.clientX, sy: e.clientY, ox: f.x, oy: f.y }
+  }, [fields, snapshot])
+
+  const onFieldClick = useCallback((e: React.MouseEvent) => {
+    e.stopPropagation()  // กันไม่ให้ bubble ขึ้น canvas แล้ว clear selected
+  }, [])
+
+  useEffect(() => {
+    function onMove(e: MouseEvent) {
+      if (!dragging.current) return
+      const dx = (e.clientX - dragging.current.sx) / SCALE
+      const dy = (e.clientY - dragging.current.sy) / SCALE
+      const f  = dragging.current
+      setLayout(prev => ({
+        ...prev,
+        fields: prev.fields.map(field =>
+          field.id !== f.id ? field : {
+            ...field,
+            x: Math.max(0, Math.min(prev.labelW - field.w, Math.round((f.ox + dx) * 2) / 2)),
+            y: Math.max(0, Math.min(prev.labelH - (field.type === 'separator' ? 0 : field.h), Math.round((f.oy + dy) * 2) / 2)),
+          }
+        ),
+      }))
+    }
+    function onUp() { dragging.current = null }
+    function onClickOutside() { setShowAddMenu(false) }
+    document.addEventListener('mousemove', onMove)
+    document.addEventListener('mouseup',   onUp)
+    document.addEventListener('click',     onClickOutside)
+    return () => {
+      document.removeEventListener('mousemove', onMove)
+      document.removeEventListener('mouseup',   onUp)
+      document.removeEventListener('click',     onClickOutside)
+    }
+  }, [])
+
+  // ── render canvas field ───────────────────────────────────────────────────
+  function renderField(f: FieldConfig) {
+    if (!f.visible) return null
+    const isSel   = selected === f.id
+    const outline = isSel ? '2px solid #3b82f6' : '1px dashed transparent'
+    const base: React.CSSProperties = {
+      position: 'absolute',
+      left:   f.x * SCALE,
+      top:    f.y * SCALE,
+      width:  f.w * SCALE,
+      cursor: 'move',
+      outline,
+      outlineOffset: 1,
+      userSelect: 'none',
+    }
+
+    if (f.type === 'separator') {
+      // เส้นตั้ง (vsep) ถ้า h > w
+      if (f.h > f.w) {
+        return (
+          <div key={f.id} onMouseDown={e => onMouseDown(e, f.id)} onClick={onFieldClick}
+            style={{ ...base, width: 2, height: f.h * SCALE, background: '#000', outlineOffset: 3 }} />
+        )
+      }
+      return (
+        <div key={f.id} onMouseDown={e => onMouseDown(e, f.id)} onClick={onFieldClick}
+          style={{ ...base, height: 2, background: '#000', outlineOffset: 3 }} />
+      )
+    }
+
+    if (f.type === 'qr') {
+      return (
+        <div key={f.id} onMouseDown={e => onMouseDown(e, f.id)} onClick={onFieldClick}
+          style={{ ...base, height: f.h * SCALE, background: '#f0f0f0', border: isSel ? 'none' : '1px dashed #aaa',
+            display: 'flex', alignItems: 'center', justifyContent: 'center', color: '#888', fontSize: 10 }}>
+          QR
+        </div>
+      )
+    }
+
+    // pt → px ที่สเกลแคนวาส (1pt = 1/72 inch = 0.352778 mm) → ให้เท่าหน้าจริง 1:1
+    const ptToPx = (pt: number) => pt * SCALE * 25.4 / 72
+    const pxSize = ptToPx(f.fontSize)
+    const isWeight = f.type === 'weight'
+
+    return (
+      <div key={f.id} onMouseDown={e => onMouseDown(e, f.id)} onClick={onFieldClick}
+        style={{
+          ...base,
+          height: f.h * SCALE,
+          border:  f.border ? '1px solid #000' : (isSel ? 'none' : '1px dashed transparent'),
+          boxSizing: 'border-box',
+          overflow: 'visible',
+          display: 'flex',
+          flexDirection: isWeight ? 'column' : 'row',
+          alignItems: isWeight ? 'flex-start' : 'center',
+          justifyContent: f.align === 'center' ? 'center' : f.align === 'right' ? 'flex-end' : 'flex-start',
+          padding: isWeight ? `0 ${1 * SCALE}px` : `0 ${0.5 * SCALE}px`,
+          color: '#000',
+          fontFamily: 'Sarabun, Arial, sans-serif',
+        }}>
+        {isWeight ? (
+          <>
+            <span style={{ fontSize: ptToPx(7.5), fontWeight: '700', lineHeight: 1.4 }}>Net Weight</span>
+            <span style={{ fontSize: pxSize,      fontWeight: '900', lineHeight: 1, color: '#003087' }}>{f.sampleValue.split(' ')[0]}</span>
+            <span style={{ fontSize: ptToPx(8),   fontWeight: '700', lineHeight: 1.3 }}>Kgs.</span>
+          </>
+        ) : (
+          <span style={{ fontSize: pxSize, fontWeight: f.fontWeight, fontStyle: f.italic ? 'italic' : 'normal',
+            textAlign: f.align, width: '100%',
+            display: '-webkit-box', WebkitLineClamp: 2, WebkitBoxOrient: 'vertical',
+            overflow: 'hidden', lineHeight: 1.1, wordBreak: 'break-word' }}>
+            {f.sampleValue}
+          </span>
+        )}
+      </div>
+    )
+  }
+
+  // ── ทดสอบปริ้น — เปิด popup ด้วยข้อมูล sampleValue จาก layout ──────────────
+  function doTestPrint() {
+    const W = layout.labelW
+    const H = layout.labelH
+    const win = window.open('', '_blank', `width=${Math.round(W*3.78)},height=${Math.round(H*3.78)},menubar=no,toolbar=no,location=no`)
+    if (!win) { alert('⚠ Browser block popup — กรุณาอนุญาต popup ของเว็บนี้'); return }
+
+    const fields = layout.fields
+    const renderF = (f: FieldConfig) => {
+      if (!f.visible) return ''
+      const justify = f.align === 'center' ? 'justify-content:center;' : f.align === 'right' ? 'justify-content:flex-end;' : ''
+      const italic  = f.italic ? 'font-style:italic;' : ''
+      const border  = f.border ? 'border:1px solid #000;' : ''
+      if (f.type === 'separator') {
+        if (f.h > f.w) return `<div style="position:absolute;left:${f.x}mm;top:${f.y}mm;width:0;height:${f.h}mm;border-left:1px solid #000;box-sizing:border-box"></div>`
+        return `<div style="position:absolute;left:${f.x}mm;top:${f.y}mm;width:${f.w}mm;height:0;border-top:1px solid #000;box-sizing:border-box"></div>`
+      }
+      if (f.type === 'qr') {
+        return `<div style="position:absolute;left:${f.x}mm;top:${f.y}mm;width:${f.w}mm;height:${f.h}mm;${border}box-sizing:border-box;display:flex;align-items:center;justify-content:center;background:#eee;font-size:8pt;color:#555">QR</div>`
+      }
+      if (f.type === 'weight') {
+        return `<div style="position:absolute;left:${f.x}mm;top:${f.y}mm;width:${f.w}mm;height:${f.h}mm;${border}box-sizing:border-box;overflow:hidden;padding:0 0.5mm">
+          <div style="font-size:7.5pt;font-weight:700;line-height:1.4">Net Weight</div>
+          <div style="font-size:${f.fontSize}pt;font-weight:900;line-height:1;color:#003087">${f.sampleValue}</div>
+          <div style="font-size:8pt;font-weight:700;line-height:1.3">Kgs.</div>
+        </div>`
+      }
+      return `<div style="position:absolute;left:${f.x}mm;top:${f.y}mm;width:${f.w}mm;height:${f.h}mm;font-size:${f.fontSize}pt;font-weight:${f.fontWeight};text-align:${f.align};${italic}${border}box-sizing:border-box;overflow:visible;display:flex;align-items:center;${justify}padding:0 0.5mm">
+        <span style="display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden;line-height:1.1;width:100%;word-break:break-word">${f.sampleValue}</span>
+      </div>`
+    }
+
+    win.document.write(`<!DOCTYPE html><html><head><meta charset="utf-8"/>
+<style>
+@import url('https://fonts.googleapis.com/css2?family=Sarabun:wght@400;600;700;800;900&display=swap');
+*{box-sizing:border-box;margin:0;padding:0}
+html,body{font-family:'Sarabun','Arial',sans-serif;color:#000;background:#fff;width:${W}mm;height:${H}mm}
+@media print{@page{size:${W}mm ${H}mm;margin:0}body{-webkit-print-color-adjust:exact;print-color-adjust:exact}}
+</style>
+</head><body>
+<div style="position:relative;width:${W}mm;height:${H}mm;border:1.5px solid #000;overflow:hidden">
+${fields.map(renderF).join('\n')}
+</div>
+<script>
+document.fonts.ready.then(function(){setTimeout(function(){window.print();window.close()},400)})
+</script></body></html>`)
+    win.document.close()
+  }
+
+  // helper สำหรับ number input ใน property panel (ต้องอยู่นอก PropPanel เพื่อกัน remount)
+  const numInput = (key: keyof FieldConfig, step = 0.5, min = 0) => selectedField ? (
+    <input type="number" value={(selectedField[key] as number) ?? 0} step={step} min={min}
+      onChange={e => updateField(selectedField.id, { [key]: parseFloat(e.target.value) || 0 })}
+      className="bg-slate-800 text-white text-xs rounded px-2 py-1 w-full border border-slate-700 focus:border-blue-500 focus:outline-none" />
+  ) : null
+
+  // ── UI ────────────────────────────────────────────────────────────────────
+  if (loading) return (
+    <div className="flex items-center justify-center h-full bg-[#0a0f1e] text-slate-400 gap-3">
+      <Loader2 size={20} className="animate-spin" />
+      <span className="text-sm">กำลังโหลด layout...</span>
+    </div>
+  )
+
+  return (
+    <div className="flex bg-[#0a0f1e] text-white overflow-hidden" style={{ height: 'calc(100vh - 49px)' }}>
+
+      {/* ── Left: field list ────────────────────────────────────────────── */}
+      <div className="w-48 bg-slate-900 border-r border-slate-800 flex flex-col shrink-0">
+        <div className="px-3 py-2 border-b border-slate-800 flex items-center justify-between">
+          <p className="text-[10px] font-semibold text-slate-400 uppercase tracking-wider">ฟิลด์ทั้งหมด</p>
+          <div className="relative">
+            <button onClick={e => { e.stopPropagation(); setShowAddMenu(v => !v) }}
+              className="flex items-center gap-1 px-2 py-0.5 rounded bg-blue-600 hover:bg-blue-500 text-white text-[10px] font-semibold">
+              <Plus size={10} />เพิ่ม
+            </button>
+            {showAddMenu && (
+              <div className="absolute left-0 top-full mt-1 bg-slate-800 border border-slate-700 rounded-lg shadow-2xl z-50 overflow-hidden w-40">
+                <button onClick={e => { e.stopPropagation(); addField('text') }}
+                  className="w-full flex items-center gap-2 px-3 py-2 text-xs hover:bg-slate-700 text-slate-200">
+                  <Type size={11} className="text-blue-400" />ข้อความ (Text)
+                </button>
+                <button onClick={e => { e.stopPropagation(); addField('weight') }}
+                  className="w-full flex items-center gap-2 px-3 py-2 text-xs hover:bg-slate-700 text-slate-200">
+                  <Type size={11} className="text-green-400" />Net Weight (ใหญ่)
+                </button>
+                <button onClick={e => { e.stopPropagation(); addField('separator') }}
+                  className="w-full flex items-center gap-2 px-3 py-2 text-xs hover:bg-slate-700 text-slate-200">
+                  <Minus size={11} className="text-slate-400" />เส้นคั่น
+                </button>
+                <button onClick={e => { e.stopPropagation(); addField('qr') }}
+                  className="w-full flex items-center gap-2 px-3 py-2 text-xs hover:bg-slate-700 text-slate-200">
+                  <QrCode size={11} className="text-purple-400" />QR Code
+                </button>
+              </div>
+            )}
+          </div>
+        </div>
+        <div className="flex-1 overflow-y-auto py-1">
+          {fields.map(f => (
+            <button key={f.id} onClick={() => setSelected(f.id)}
+              className={`w-full flex items-center gap-2 px-3 py-1.5 text-left text-xs transition-colors ${
+                selected === f.id ? 'bg-blue-600/20 text-blue-300' : 'hover:bg-slate-800 text-slate-300'
+              } ${!f.visible ? 'opacity-35' : ''}`}>
+              <Move size={10} className="shrink-0 text-slate-500" />
+              <span className="flex-1 truncate">{f.label}</span>
+              <span onClick={e => { e.stopPropagation(); updateField(f.id, { visible: !f.visible }) }}
+                className="shrink-0 opacity-50 hover:opacity-100 cursor-pointer">
+                {f.visible ? <Eye size={10} /> : <EyeOff size={10} />}
+              </span>
+            </button>
+          ))}
+        </div>
+      </div>
+
+      {/* ── Center: canvas ───────────────────────────────────────────────── */}
+      <div className="flex-1 flex flex-col items-center justify-start overflow-auto bg-slate-950 p-8 gap-4" style={{ scrollBehavior: 'smooth' }}>
+
+        {/* toolbar */}
+        <div className="flex items-center gap-3 w-full max-w-max">
+          {/* Size switcher */}
+          <div className="flex gap-1 bg-slate-900 p-1 rounded-lg border border-slate-800">
+            <button onClick={() => setSize('short')}
+              className={`px-3 py-1.5 rounded-md text-xs font-bold transition-colors ${
+                size === 'short' ? 'bg-brand-600 text-white' : 'text-slate-400 hover:text-white'
+              }`}>
+              🏷 ใบสั้น 76×76
+            </button>
+            <button onClick={() => setSize('waste')}
+              className={`px-3 py-1.5 rounded-md text-xs font-bold transition-colors ${
+                size === 'waste' ? 'bg-amber-600 text-white' : 'text-slate-400 hover:text-white'
+              }`}>
+              ♻ ใบเศษ 76×76
+            </button>
+          </div>
+          <span className="text-xs text-slate-500 mr-2">· ลากเพื่อจัดตำแหน่ง</span>
+          {/* Undo / Redo */}
+          <div className="flex gap-1 bg-slate-900 p-1 rounded-lg border border-slate-800">
+            <button onClick={undo} disabled={past.length === 0} title="ย้อนกลับ (Ctrl+Z)"
+              className="flex items-center gap-1 px-2.5 py-1 rounded-md text-xs font-bold text-slate-300 hover:text-white hover:bg-slate-700 disabled:opacity-30 disabled:hover:bg-transparent">
+              ↶ ย้อน
+            </button>
+            <button onClick={redo} disabled={future.length === 0} title="ทำซ้ำ (Ctrl+Y)"
+              className="flex items-center gap-1 px-2.5 py-1 rounded-md text-xs font-bold text-slate-300 hover:text-white hover:bg-slate-700 disabled:opacity-30 disabled:hover:bg-transparent">
+              ↷ ทำซ้ำ
+            </button>
+          </div>
+          <button onClick={doSave}
+            className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-semibold transition-colors ${
+              savedFlash ? 'bg-green-600 text-white' : 'bg-blue-600 hover:bg-blue-500 text-white'
+            }`}>
+            <Save size={12} />
+            {savedFlash ? 'บันทึกแล้ว ✓' : 'บันทึก Layout'}
+          </button>
+          <button onClick={doReset}
+            className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-semibold bg-slate-800 hover:bg-slate-700 text-slate-300">
+            <RotateCcw size={12} />รีเซ็ต
+          </button>
+          <button onClick={doTestPrint}
+            className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-semibold bg-green-700 hover:bg-green-600 text-white">
+            🖨 ทดสอบปริ้น
+          </button>
+        </div>
+
+        {/* label canvas — ห่อด้วย overflow:visible เพื่อให้ field ที่ลากออกนอกยังเห็นได้ */}
+        <div className="shrink-0" style={{ padding: '20px', background: 'transparent' }}>
+          <div
+            ref={canvasRef}
+            className="relative bg-white shadow-2xl"
+            style={{
+              width: layout.labelW * SCALE,
+              height: layout.labelH * SCALE,
+              border: '2px solid #000',
+              outline: '4px solid #1e293b',
+              outlineOffset: '2px',
+              overflow: 'visible',   // ← ให้ field ลากออกนอกได้โดยไม่ถูก clip
+              touchAction: 'none',
+            }}
+            onClick={() => setSelected(null)}>
+
+            {/* mm ruler guides แนวนอน ทุก 10mm */}
+            {Array.from({ length: Math.floor(layout.labelH / 10) }, (_, i) => (
+              <div key={i} style={{
+                position: 'absolute', left: 0, top: (i + 1) * 10 * SCALE,
+                width: '100%', height: 1, background: '#dbeafe', pointerEvents: 'none', zIndex: 0,
+              }} />
+            ))}
+
+            {/* mm ruler guides แนวตั้ง ทุก 10mm */}
+            {Array.from({ length: Math.floor(layout.labelW / 10) }, (_, i) => (
+              <div key={i} style={{
+                position: 'absolute', top: 0, left: (i + 1) * 10 * SCALE,
+                height: '100%', width: 1, background: '#f1f5f9', pointerEvents: 'none', zIndex: 0,
+              }} />
+            ))}
+
+            {fields.map(renderField)}
+          </div>
+        </div>
+
+        <p className="text-[10px] text-slate-600 shrink-0">
+          เลื่อน scroll ได้ · คลิกพื้นที่ว่างเพื่อยกเลิกการเลือก · เส้น = ทุก 10 mm
+        </p>
+      </div>
+
+      {/* ── Right: property panel ────────────────────────────────────────── */}
+      <div className="w-60 bg-slate-900 border-l border-slate-800 flex flex-col shrink-0">
+        <div className="px-3 py-2 border-b border-slate-800">
+          <p className="text-[10px] font-semibold text-slate-400 uppercase tracking-wider">
+            {selectedField ? `✏️ ${selectedField.label}` : 'คุณสมบัติ'}
+          </p>
+        </div>
+        {/* ── Property panel (inline — ห้ามย้ายเป็น sub-component เพราะจะ remount) ── */}
+        {!selectedField ? (
+          <div className="flex-1 flex items-center justify-center p-4">
+            <p className="text-slate-500 text-xs text-center">คลิกเลือกฟิลด์<br/>บน canvas เพื่อแก้ไข</p>
+          </div>
+        ) : (
+          <div className="flex-1 overflow-y-auto p-3 space-y-4 text-xs">
+
+            {/* ตำแหน่ง */}
+            <section>
+              <p className="text-slate-400 font-semibold uppercase tracking-wider mb-2">ตำแหน่ง (mm)</p>
+              <div className="grid grid-cols-2 gap-2">
+                <label className="flex flex-col gap-1"><span className="text-slate-500">X (ซ้าย)</span>{numInput('x')}</label>
+                <label className="flex flex-col gap-1"><span className="text-slate-500">Y (บน)</span>{numInput('y')}</label>
+                <label className="flex flex-col gap-1"><span className="text-slate-500">กว้าง</span>{numInput('w', 1, 1)}</label>
+                {selectedField.type !== 'separator' &&
+                  <label className="flex flex-col gap-1"><span className="text-slate-500">สูง</span>{numInput('h', 0.5, 1)}</label>}
+              </div>
+            </section>
+
+            {/* ชื่อ label */}
+            <section>
+              <p className="text-slate-400 font-semibold uppercase tracking-wider mb-1">ชื่อฟิลด์</p>
+              <input type="text" value={selectedField.label}
+                onChange={e => updateField(selectedField.id, { label: e.target.value })}
+                className="bg-slate-800 text-white text-xs rounded px-2 py-1 w-full border border-slate-700 focus:border-blue-500 focus:outline-none" />
+            </section>
+
+            {/* ตัวอักษร */}
+            {selectedField.type !== 'separator' && selectedField.type !== 'qr' && (
+              <section>
+                <p className="text-slate-400 font-semibold uppercase tracking-wider mb-2">ตัวอักษร</p>
+                <div className="space-y-2">
+                  <label className="flex flex-col gap-1">
+                    <span className="text-slate-500">ขนาด (pt)</span>
+                    {numInput('fontSize', 0.5, 6)}
+                  </label>
+                  <label className="flex flex-col gap-1">
+                    <span className="text-slate-500">น้ำหนัก</span>
+                    <select value={selectedField.fontWeight}
+                      onChange={e => updateField(selectedField.id, { fontWeight: e.target.value })}
+                      className="bg-slate-800 text-white text-xs rounded px-2 py-1 border border-slate-700 focus:border-blue-500 focus:outline-none">
+                      <option value="400">ปกติ (400)</option>
+                      <option value="700">หนา (700)</option>
+                      <option value="900">หนามาก (900)</option>
+                    </select>
+                  </label>
+                  <label className="flex flex-col gap-1">
+                    <span className="text-slate-500">การจัดวาง</span>
+                    <select value={selectedField.align}
+                      onChange={e => updateField(selectedField.id, { align: e.target.value as FieldConfig['align'] })}
+                      className="bg-slate-800 text-white text-xs rounded px-2 py-1 border border-slate-700 focus:border-blue-500 focus:outline-none">
+                      <option value="left">ซ้าย</option>
+                      <option value="center">กลาง</option>
+                      <option value="right">ขวา</option>
+                    </select>
+                  </label>
+                  <label className="flex items-center gap-2 cursor-pointer">
+                    <input type="checkbox" checked={selectedField.italic}
+                      onChange={e => updateField(selectedField.id, { italic: e.target.checked })} className="rounded" />
+                    <span className="text-slate-300">ตัวเอียง</span>
+                  </label>
+                </div>
+              </section>
+            )}
+
+            {/* กรอบ */}
+            {selectedField.type !== 'separator' && (
+              <label className="flex items-center gap-2 cursor-pointer">
+                <input type="checkbox" checked={selectedField.border}
+                  onChange={e => updateField(selectedField.id, { border: e.target.checked })} className="rounded" />
+                <span className="text-slate-300">แสดงกรอบ</span>
+              </label>
+            )}
+
+            {/* ตัวอย่างข้อความ */}
+            {selectedField.type !== 'qr' && selectedField.type !== 'separator' && (
+              <section>
+                <p className="text-slate-400 font-semibold uppercase tracking-wider mb-1">ตัวอย่างข้อความ</p>
+                <input type="text" value={selectedField.sampleValue}
+                  onChange={e => updateField(selectedField.id, { sampleValue: e.target.value })}
+                  className="bg-slate-800 text-white text-xs rounded px-2 py-1 w-full border border-slate-700 focus:border-blue-500 focus:outline-none" />
+              </section>
+            )}
+
+            {/* ลำดับ */}
+            <section>
+              <p className="text-slate-400 font-semibold uppercase tracking-wider mb-2">ลำดับ (Z-Order)</p>
+              <div className="flex gap-2">
+                <button onClick={() => moveOrder(selectedField.id, -1)}
+                  className="flex-1 flex items-center justify-center gap-1 py-1.5 rounded bg-slate-800 hover:bg-slate-700 text-slate-300">
+                  <ChevronUp size={12} />ขึ้น
+                </button>
+                <button onClick={() => moveOrder(selectedField.id, 1)}
+                  className="flex-1 flex items-center justify-center gap-1 py-1.5 rounded bg-slate-800 hover:bg-slate-700 text-slate-300">
+                  <ChevronDown size={12} />ลง
+                </button>
+              </div>
+            </section>
+
+            {/* ซ่อน/แสดง */}
+            <button onClick={() => updateField(selectedField.id, { visible: !selectedField.visible })}
+              className={`w-full flex items-center justify-center gap-2 py-2 rounded-lg font-semibold transition-colors ${
+                selectedField.visible
+                  ? 'bg-slate-800 hover:bg-slate-700 text-slate-400'
+                  : 'bg-green-900/30 text-green-400 hover:bg-green-900/50'
+              }`}>
+              {selectedField.visible ? <><EyeOff size={12} />ซ่อนฟิลด์นี้</> : <><Eye size={12} />แสดงฟิลด์นี้</>}
+            </button>
+
+            {/* ลบ */}
+            <button onClick={() => { if (confirm(`ลบ "${selectedField.label}" ออก?`)) deleteField(selectedField.id) }}
+              className="w-full flex items-center justify-center gap-2 py-2 rounded-lg font-semibold bg-red-900/20 hover:bg-red-900/50 text-red-400 hover:text-red-300 transition-colors">
+              <Trash2 size={12} />ลบฟิลด์นี้
+            </button>
+          </div>
+        )}
+      </div>
+    </div>
+  )
+}

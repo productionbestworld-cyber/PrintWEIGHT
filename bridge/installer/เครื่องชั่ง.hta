@@ -1,0 +1,186 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8">
+<title>BWP เครื่องชั่ง</title>
+<hta:application
+  id="app"
+  applicationname="BWP Scale Bridge"
+  border="thin"
+  borderstyle="normal"
+  caption="yes"
+  maximizebutton="no"
+  minimizebutton="yes"
+  showintaskbar="yes"
+  singleinstance="yes"
+  scroll="no"
+  innerborder="no"
+  contextmenu="no"
+  selection="no"
+/>
+<style>
+  html,body{margin:0;padding:0;font-family:'Segoe UI','Sarabun',Tahoma,sans-serif;
+    background:#0a0f1e;color:#fff;-ms-user-select:none;user-select:none;overflow:hidden}
+  .wrap{padding:22px 22px 18px}
+  h1{margin:0 0 2px;font-size:20px;color:#3b82f6}
+  .sub{color:#64748b;font-size:12px;margin-bottom:16px}
+  .status{border-radius:14px;padding:16px;text-align:center;margin-bottom:18px;border:2px solid #334155;background:#0f172a}
+  .dot{font-size:15px;font-weight:bold}
+  .on{color:#10b981}.off{color:#ef4444}
+  .stbig{font-size:22px;font-weight:bold;margin-top:4px}
+  button{width:100%;border:0;border-radius:14px;cursor:pointer;font-weight:bold;color:#fff;
+    font-family:inherit;margin-bottom:12px;padding:18px 0;font-size:20px}
+  .open{background:#16a34a}.open:hover{background:#22c55e}
+  .close{background:#dc2626}.close:hover{background:#ef4444}
+  .set{background:#334155;font-size:15px;padding:12px 0}.set:hover{background:#475569}
+  .small{font-size:12px;color:#64748b;text-align:center;margin-top:6px}
+  .err{color:#f87171;font-size:12px;text-align:center;min-height:16px}
+</style>
+</head>
+<body>
+<div class="wrap">
+  <h1>&#9878; เครื่องชั่ง BWP</h1>
+  <div class="sub">กดปุ่มเพื่อเปิด หรือ ปิด</div>
+
+  <div class="status" id="box">
+    <div class="dot off" id="dot">&#9711; กำลังตรวจสอบ...</div>
+    <div class="stbig" id="big">&mdash;</div>
+  </div>
+
+  <button class="open"  onclick="startBridge()">&#9654;&nbsp; เปิดเครื่องชั่ง</button>
+  <button class="close" onclick="stopBridge()">&#9632;&nbsp; ปิดเครื่องชั่ง</button>
+  <button class="set"   onclick="openSettings()">&#9881;&nbsp; ตั้งค่า / สลับเครื่องชั่ง</button>
+
+  <div class="err" id="err"></div>
+  <div class="small">หน้าต่างนี้ปิดได้ เครื่องชั่งยังทำงานต่อ</div>
+</div>
+
+<script language="javascript">
+  var EXE = "BWPScaleBridge.exe";
+  var URL = "http://localhost:8080";
+  var shell = new ActiveXObject("WScript.Shell");
+  var fso   = new ActiveXObject("Scripting.FileSystemObject");
+  var running = false;     // สถานะล่าสุด
+  var busy = false;        // กันยิงซ้ำซ้อน
+
+  // ดักทุก error ไม่ให้เด้ง popup — โชว์ในหน้าต่างแทน
+  window.onerror = function(msg, url, line){
+    try{ document.getElementById("err").innerHTML = "ผิดพลาด: " + msg + " (บรรทัด " + line + ")"; }catch(e){}
+    return true;
+  };
+
+  // โฟลเดอร์ที่ไฟล์ .hta นี้อยู่ — รองรับ path ที่มีตัวอักษรไทย/ช่องว่าง
+  function htaDir(){
+    try{
+      var u = "" + location.href;          // file:///C:/.../เครื่องชั่ง.hta
+      u = u.replace(/^file:\/+/i, "");      // ตัด file:///
+      u = decodeURIComponent(u);            // %20/ไทย -> ปกติ
+      u = u.replace(/\//g, "\\");           // / -> \
+      return fso.GetParentFolderName(u);
+    }catch(e){ return ""; }
+  }
+
+  // หา path ของ .exe — ติดตั้งแล้ว > โฟลเดอร์เดียวกับ hta > dist
+  function findExe(){
+    try{
+      var pf = shell.ExpandEnvironmentStrings("%ProgramFiles%") + "\\BWPScaleBridge\\" + EXE;
+      if (fso.FileExists(pf)) return pf;
+      var here = htaDir();
+      if (here){
+        var p1 = here + "\\" + EXE;          if (fso.FileExists(p1)) return p1;
+        var p2 = here + "\\dist\\" + EXE;    if (fso.FileExists(p2)) return p2;
+      }
+    }catch(e){}
+    return "";
+  }
+
+  function paint(){
+    var dot = document.getElementById("dot");
+    var big = document.getElementById("big");
+    var box = document.getElementById("box");
+    if (running){
+      dot.className = "dot on";  dot.innerHTML = "&#9679; กำลังทำงาน";
+      big.innerHTML = "พร้อมชั่ง";
+      box.style.borderColor = "#10b981";
+    } else {
+      dot.className = "dot off"; dot.innerHTML = "&#9711; ปิดอยู่";
+      big.innerHTML = "&mdash;";
+      box.style.borderColor = "#334155";
+    }
+  }
+
+  function setErr(html){ document.getElementById("err").innerHTML = html; }
+
+  // เช็คครั้งเดียวว่าบริดตอบที่ port 8080 ไหม → cb(true/false)
+  function checkOnce(cb){
+    try{
+      var xhr = new ActiveXObject("Microsoft.XMLHTTP");
+      xhr.open("GET", URL + "/status?t=" + (new Date()).getTime(), true);
+      var done = false;
+      xhr.onreadystatechange = function(){
+        if (xhr.readyState == 4 && !done){ done = true; cb(xhr.status == 200); }
+      };
+      xhr.send();
+      setTimeout(function(){ if(!done){ done=true; try{xhr.abort();}catch(e){} cb(false); } }, 1200);
+    }catch(e){ cb(false); }
+  }
+
+  // ตรวจสถานะตามรอบ (ไม่ทับช่วงกำลังเปิด)
+  function refresh(){
+    if (busy) return;
+    busy = true;
+    checkOnce(function(up){ running = up; busy = false; paint(); });
+  }
+
+  function startBridge(){
+    setErr("");
+    if (running){ openSettings(); return; }
+    var exe = findExe();
+    if (!exe){
+      setErr("ไม่พบไฟล์ <b>"+EXE+"</b><br>ต้องก๊อป <b>"+EXE+"</b> มาวางโฟลเดอร์เดียวกับไฟล์นี้");
+      return;
+    }
+    document.getElementById("big").innerHTML = "กำลังเปิด...";
+    // ปลดบล็อกไฟล์ที่ก๊อปมาจากเครื่องอื่น (Mark of the Web) แล้วค่อยรัน
+    try{ shell.Run('powershell -NoProfile -ExecutionPolicy Bypass -Command "Unblock-File -LiteralPath \'' + exe + '\'"', 0, true); }catch(e){}
+    try{ shell.Run('"'+exe+'"', 0, false); }catch(e){
+      setErr("เปิดไม่สำเร็จ: " + e.message);
+      return;
+    }
+    pollStart(0, exe);
+  }
+
+  // รอจนบริดขึ้น (ลองได้ ~7 วิ) แล้วเด้งหน้าตั้งค่า; ถ้าไม่ขึ้นบอกวิธีแก้
+  function pollStart(n, exe){
+    checkOnce(function(up){
+      if (up){ running = true; paint(); setErr(""); openSettings(); return; }
+      if (n < 7){ setTimeout(function(){ pollStart(n+1, exe); }, 1000); return; }
+      running = false; paint();
+      setErr("เปิดเครื่องชั่งไม่ขึ้น &mdash; อาจถูก Windows บล็อก<br>"
+        + "วิธีแก้: คลิกขวา <b>"+EXE+"</b> &rarr; Properties &rarr; ติ๊ก <b>Unblock</b> &rarr; OK แล้วลองใหม่<br>"
+        + "<a href='#' onclick='openFolder();return false;' style='color:#60a5fa'>เปิดโฟลเดอร์ไฟล์</a>");
+    });
+  }
+
+  function stopBridge(){
+    setErr("");
+    try{ shell.Run('taskkill /f /im '+EXE, 0, true); }catch(e){}
+    running = false; paint();
+    setTimeout(refresh, 800);
+  }
+
+  function openSettings(){ shell.Run(URL, 1, false); }
+
+  function openFolder(){
+    var here = htaDir();
+    try{ if(here) shell.Run('explorer "'+here+'"', 1, false); }catch(e){}
+  }
+
+  // ปรับขนาดหน้าต่าง + ตรวจสถานะทุก 2.5 วิ
+  window.resizeTo(360, 460);
+  paint();
+  refresh();
+  window.setInterval(refresh, 2500);
+</script>
+</body>
+</html>
