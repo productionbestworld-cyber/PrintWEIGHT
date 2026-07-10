@@ -126,11 +126,12 @@ function ActiveJobsPanel({ onGo }: { onGo: (page: Page, jobId?: string) => void 
 function HomeGuide({ onGo }: { onGo: (page: Page, jobId?: string) => void }) {
   const [showHowTo, setShowHowTo] = useState(false)
   const weighSteps = [
-    'รับม้วนใส / ชั่งน้ำหนักก่อนพิมพ์',
-    'ชั่งเศษพิมพ์: เศษสี หรือเศษกาว',
-    'ชั่งม้วนใหญ่ที่พิมพ์ได้',
-    'นำไปสลิท แล้วชั่งเศษข้าง',
-    'ชั่งม้วนสำเร็จรูป และปริ้นลาเบล',
+    'ตั้งงาน: ใส่ SO / WO เลือกลูกค้า สินค้า เครื่องพิมพ์ และเครื่องสลิท',
+    'ชั่งม้วนก่อนพิมพ์: รับม้วนวัตถุดิบเข้าระบบก่อนนำไปพิมพ์',
+    'ชั่งฝั่งพิมพ์: บันทึกเศษวัตถุดิบ เศษสี/เศษกาว แล้วชั่งม้วนพิมพ์แล้ว',
+    'ชั่งฝั่งสลิท: เลือกม้วนพิมพ์แล้วไปสลิท บันทึกเศษข้าง/เศษกระบวนการ',
+    'ชั่งผลลัพธ์: ม้วนสำเร็จส่งลูกค้า / ม้วนเมตรไม่ถึงพักไว้ / ม้วนแก้ไข / NCR รอตัดสินใจ',
+    'โอน: ใช้หลังงานเสร็จ เพื่อส่งม้วนสำเร็จรูปออกตามใบงาน',
   ]
 
   return (
@@ -150,19 +151,19 @@ function HomeGuide({ onGo }: { onGo: (page: Page, jobId?: string) => void }) {
 
         {showHowTo && (
           <div className="fixed inset-0 z-50 bg-black/70 flex items-center justify-center p-4" onClick={() => setShowHowTo(false)}>
-            <div className="w-full max-w-xl rounded-3xl border border-slate-700 bg-slate-900 shadow-2xl" onClick={event => event.stopPropagation()}>
+            <div className="w-full max-w-3xl rounded-3xl border border-slate-700 bg-slate-900 shadow-2xl" onClick={event => event.stopPropagation()}>
               <div className="flex items-center justify-between px-5 py-4 border-b border-slate-800">
                 <div>
-                  <p className="text-white text-xl font-black">วิธีใช้งาน</p>
-                  <p className="text-slate-400 text-sm mt-0.5">ตั้งงาน → ชั่ง → โอน</p>
+                  <p className="text-white text-xl font-black">วิธีใช้งานแบบเข้าใจง่าย</p>
+                  <p className="text-slate-400 text-sm mt-0.5">ดูเส้นทางม้วน 1 งาน: ก่อนพิมพ์ → พิมพ์แล้ว → สลิท → ส่งลูกค้า/พักไว้</p>
                 </div>
                 <button onClick={() => setShowHowTo(false)} className="text-slate-400 hover:text-white text-2xl leading-none">×</button>
               </div>
               <div className="p-5 space-y-2">
                 {weighSteps.map((label, index) => (
-                  <div key={label} className="flex items-center gap-3 rounded-2xl border border-slate-700 bg-slate-800/70 px-4 py-3">
-                    <span className="flex h-8 w-8 items-center justify-center rounded-xl bg-brand-600 text-white font-black">{index + 1}</span>
-                    <span className="text-white font-bold">{label}</span>
+                  <div key={label} className="flex items-start gap-3 rounded-2xl border border-slate-700 bg-slate-800/70 px-4 py-3">
+                    <span className="mt-0.5 flex h-8 w-8 shrink-0 items-center justify-center rounded-xl bg-brand-600 text-white font-black">{index + 1}</span>
+                    <span className="text-white font-bold leading-relaxed">{label}</span>
                   </div>
                 ))}
               </div>
