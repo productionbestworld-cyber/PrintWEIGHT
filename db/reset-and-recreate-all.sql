@@ -97,6 +97,7 @@ CREATE TABLE IF NOT EXISTS products (
   core_weight   TEXT,
   length        TEXT,
   pcs           TEXT,
+  barcode_no    TEXT,
   cust_code     TEXT,
   created_at    TIMESTAMPTZ NOT NULL DEFAULT NOW(),
   updated_at    TIMESTAMPTZ NOT NULL DEFAULT NOW()
@@ -222,6 +223,7 @@ CREATE TABLE IF NOT EXISTS production_rolls (
   -- เธญเธทเนเธ เน
   so_id           UUID,
   is_legacy       BOOLEAN DEFAULT FALSE,
+  withdrawn_to_job_id UUID,
   new_system      BOOLEAN DEFAULT TRUE,
   total_kg        NUMERIC,
   total_rolls     INT,
@@ -231,9 +233,13 @@ CREATE INDEX IF NOT EXISTS idx_pr_machine_lot ON production_rolls(machine_no, lo
 CREATE INDEX IF NOT EXISTS idx_pr_section ON production_rolls(section);
 CREATE INDEX IF NOT EXISTS idx_pr_created ON production_rolls(created_at DESC);
 CREATE INDEX IF NOT EXISTS idx_pr_review_status ON production_rolls(review_status) WHERE review_status IS NOT NULL;
+CREATE INDEX IF NOT EXISTS idx_products_barcode_no ON products(barcode_no);
+CREATE INDEX IF NOT EXISTS idx_production_rolls_withdrawn_to_job
+  ON production_rolls(withdrawn_to_job_id)
+  WHERE withdrawn_to_job_id IS NOT NULL;
 DROP INDEX IF EXISTS uniq_production_rolls_lot_rollno;
 CREATE UNIQUE INDEX IF NOT EXISTS uniq_production_rolls_lot_wo_rollno
-  ON production_rolls (machine_no, lot_no, COALESCE(work_order, ''), roll_no, roll_type)
+  ON production_rolls (machine_no, lot_no, COALESCE(work_order, ''), roll_no, roll_type, COALESCE(inbound_type, ''))
   WHERE roll_type IN ('good','bad') AND roll_no > 0;
 
 ALTER TABLE production_rolls ENABLE ROW LEVEL SECURITY;

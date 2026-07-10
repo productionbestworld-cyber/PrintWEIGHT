@@ -15,7 +15,7 @@ export interface FieldConfig {
   fontWeight: string     // '400' | '700' | '900'
   align: 'left' | 'center' | 'right'
   visible: boolean
-  type: 'text' | 'qr' | 'separator' | 'weight'
+  type: 'text' | 'qr' | 'separator' | 'weight' | 'barcode'
   border: boolean
   italic: boolean
 }
@@ -243,6 +243,9 @@ export const DEFAULT_LAYOUT_SHORT: LabelLayout = {
       visible:true, type:'weight', border:false, italic:false },
     { id:'gross', label:'Gross Weight', sampleValue:'Gross 27.00 Kgs.',
       x:2, y:58.5, w:40, h:4, fontSize:8, fontWeight:'700', align:'left',
+      visible:true, type:'text', border:false, italic:false },
+    { id:'barcode_lbl', label:'Barcode No. (เลข 13 หลัก)', sampleValue:'Barcode  8850123456789',
+      x:2, y:62.8, w:50, h:4, fontSize:8, fontWeight:'700', align:'left',
       visible:true, type:'text', border:false, italic:false },
     { id:'qr', label:'QR Code', sampleValue:'QR',
       x:53, y:46, w:21, h:21, fontSize:7, fontWeight:'400', align:'center',

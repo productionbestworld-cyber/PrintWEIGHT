@@ -49,6 +49,7 @@ CREATE TABLE IF NOT EXISTS products (
   core_weight   TEXT,
   length        TEXT,
   pcs           TEXT,
+  barcode_no    TEXT,   -- Barcode No. (เลข 13 หลัก) แสดงบนใบปะหน้า
   cust_code     TEXT,
   created_at    TIMESTAMPTZ NOT NULL DEFAULT NOW(),
   updated_at    TIMESTAMPTZ NOT NULL DEFAULT NOW()

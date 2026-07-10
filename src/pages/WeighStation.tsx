@@ -83,6 +83,20 @@ async function machineDecimal(machineNo: string): Promise<number> {
   } catch { return 2 }
 }
 
+// Barcode No. (เลข 13 หลัก) ผูกกับสินค้า (item_code) — cache กัน query ซ้ำ
+const _barcodeCache: Record<string, string> = {}
+async function productBarcode(itemCode: string): Promise<string> {
+  const ic = (itemCode ?? '').trim()
+  if (!ic) return ''
+  if (ic in _barcodeCache) return _barcodeCache[ic]
+  try {
+    const { data } = await supabase.from('products').select('barcode_no').eq('item_code', ic).maybeSingle()
+    const b = String((data as any)?.barcode_no ?? '').trim()
+    _barcodeCache[ic] = b
+    return b
+  } catch { return '' }
+}
+
 export async function reprintRollLabel(roll: any, size: 'long' | 'short' = 'short') {
   const p = rollToProfile(roll, size)
   p.decimal = await machineDecimal(roll.machine_no ?? '')   // ทศนิยมตามเครื่อง (BL02/BL04 = 1)
@@ -92,6 +106,8 @@ export async function reprintRollLabel(roll: any, size: 'long' | 'short' = 'shor
 
 async function buildLabelHtml(p: MachineProfile, rollNo: number, gross: number, net: number, size: 'long'|'short' = 'short', rollType: string = 'good', reason = '', rollId?: string, prodDate?: string | Date | null): Promise<{ innerHtml: string; W: number; H: number }> {
   const dec     = p.decimal
+  // Barcode No. (เลข 13 หลัก) ผูกกับสินค้า — ถ้าตั้งไว้ที่ profile แล้วใช้เลย ไม่งั้น lookup จาก item_code
+  const barcodeNo = String((p as any).barcodeNo ?? '').trim() || await productBarcode(p.itemCode ?? '')
   const inboundType = String((p as any).inboundType ?? '')
   const hideLotOnLabel = rollType === 'good' && (inboundType === 'input_roll' || inboundType === 'printed_jumbo')
   const goodStageLabel =
@@ -169,7 +185,8 @@ async function buildLabelHtml(p: MachineProfile, rollNo: number, gross: number, 
     length:      `Length&nbsp;&nbsp;<b>${p.length || '—'}</b>&nbsp;M.${p.pcs ? `&nbsp;&nbsp;<b>${p.pcs}</b>&nbsp;Pcs.` : ''}`,
     gross:       `Gross Weight&nbsp;&nbsp;<b>${fmt(gross, dec)} Kgs.</b>`,
     net:         fmt(net, dec),
-    barcode_lbl: 'Barcode No.',
+    barcode_lbl: barcodeNo ? `Barcode No.&nbsp;&nbsp;<b>${barcodeNo}</b>` : '',
+    barcode:     barcodeNo,
     inspector:   `ผู้ตรวจสอบ&nbsp;&nbsp;<b>${p.inspector || '—'}</b>`,
     // old compat keys
     meta:        `Mat&nbsp;<b>${p.matCode}</b>&nbsp;&nbsp;&nbsp;MFG&nbsp;<b>${mfgDate}</b>&nbsp;&nbsp;&nbsp;Roll&nbsp;<b>${rollNo === 0 ? '—' : rollNo}</b>`,
@@ -190,6 +207,13 @@ async function buildLabelHtml(p: MachineProfile, rollNo: number, gross: number, 
       if (f.type === 'qr') {
         const px = Math.round(f.h * 3.78)
         return `<img src="${qrUrl(qrSize)}" width="${px}" height="${px}" style="position:absolute;left:${f.x}mm;top:${f.y}mm;width:${f.w}mm;height:${f.h}mm;image-rendering:pixelated"/>`
+      }
+
+      // barcode: ภาพ Code128 ของเลข 13 หลัก (มีตัวเลขกำกับใต้แท่ง) — ว่าง = ไม่แสดง
+      if ((f as any).type === 'barcode') {
+        const code = dataMap[f.id] ?? ''
+        if (!code) return ''
+        return `<img src="${barcodeUrl(code, Math.round(f.h * 3))}" style="position:absolute;left:${f.x}mm;top:${f.y}mm;width:${f.w}mm;height:${f.h}mm;object-fit:contain"/>`
       }
 
       const value   = dataMap[f.id] ?? f.sampleValue
@@ -248,6 +272,8 @@ ${savedLayout.fields.map(renderLongField).join('\n')}
     core:      `Core&nbsp;&nbsp;<b>${fmt(core, dec)}</b>&nbsp;Kg`,
     net:       fmt(net, dec),
     gross:     `Gross ${fmt(gross, dec)} Kgs.`,
+    barcode_lbl: barcodeNo ? `Barcode&nbsp;&nbsp;<b>${barcodeNo}</b>` : '',
+    barcode:   barcodeNo,
     inspector: `ผู้ตรวจ: <b>${p.inspector || '—'}</b>`,
   }
   const renderShortField = makeFieldRenderer(shortFieldData, 56)

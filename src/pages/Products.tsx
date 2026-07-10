@@ -57,6 +57,7 @@ export interface Product {
   core_weight?:  string
   length?:       string   // ความยาว (เมตร) — ผูกกับสินค้า (item_code) ✨
   pcs?:          string
+  barcode_no?:   string   // Barcode No. (เลข 13 หลัก) — แสดงบนใบปะหน้า
   cust_code:     string
   // join-ed (จาก view products_with_customer)
   cust_name?:    string
@@ -70,15 +71,19 @@ const EMPTY_PROD: Product  = { item_code:'', product_code:'', product_name:'', w
 export async function fetchProducts(): Promise<Product[]> {
   const { data } = await supabase.from('products_with_customer').select('*').order('item_code')
   const list = (data ?? []) as Product[]
-  // merge ความยาว/pcs จากตาราง products ตรง ๆ (view อาจยังไม่มีคอลัมน์ใหม่)
+  // merge field ใหม่จากตาราง products ตรง ๆ (view อาจยังไม่มีคอลัมน์ใหม่)
   try {
-    const { data: lp } = await supabase.from('products').select('item_code, length, pcs')
+    const { data: lp } = await supabase.from('products').select('item_code, length, pcs, barcode_no')
     if (lp) {
       const m = new Map<string, any>()
       for (const r of lp) m.set((r.item_code ?? '').trim(), r)
       for (const p of list) {
         const r = m.get((p.item_code ?? '').trim())
-        if (r) { (p as any).length = r.length ?? ''; (p as any).pcs = r.pcs ?? '' }
+        if (r) {
+          (p as any).length = r.length ?? ''
+          ;(p as any).pcs = r.pcs ?? ''
+          ;(p as any).barcode_no = r.barcode_no ?? ''
+        }
       }
     }
   } catch { /* คอลัมน์ยังไม่ถูกเพิ่ม — ข้าม */ }
@@ -561,7 +566,8 @@ function ProductsTab({ products, customers, loading, onChanged }: {
       p.product_code?.toLowerCase().includes(v) ||
       p.product_name?.toLowerCase().includes(v) ||
       p.cust_name?.toLowerCase().includes(v) ||
-      p.cust_code?.toLowerCase().includes(v)
+      p.cust_code?.toLowerCase().includes(v) ||
+      p.barcode_no?.toLowerCase().includes(v)
     )
   }, [products, q])
 
@@ -585,6 +591,7 @@ function ProductsTab({ products, customers, loading, onChanged }: {
       { header:'หนา (mc)', value:'thick_mc' },
       { header:'Mat Code', value: p => p.mat_code ?? '', width:16 },
       { header:'นน.แกน (kg)', value: p => p.core_weight ?? '', width:12 },
+      { header:'Barcode No.', value: p => p.barcode_no ?? '', width:16 },
     ], { fileName:'รายการสินค้า_ItemCode', sheetName:'สินค้า' })
   }
 
@@ -620,15 +627,16 @@ function ProductsTab({ products, customers, loading, onChanged }: {
               <th className="text-left px-3 py-2.5">Mat Code</th>
               <th className="text-right px-3 py-2.5">นน.แกน</th>
               <th className="text-right px-3 py-2.5">ความยาว (M.)</th>
+              <th className="text-left px-3 py-2.5">Barcode No.</th>
               <th className="text-left px-3 py-2.5">ลูกค้า</th>
               <th className="text-right px-3 py-2.5">จัดการ</th>
             </tr>
           </thead>
           <tbody>
             {loading ? (
-              <tr><td colSpan={9} className="text-center py-8 text-slate-500">กำลังโหลด...</td></tr>
+              <tr><td colSpan={10} className="text-center py-8 text-slate-500">กำลังโหลด...</td></tr>
             ) : filtered.length === 0 ? (
-              <tr><td colSpan={9} className="text-center py-8 text-slate-500">{q ? 'ไม่พบ' : 'ยังไม่มีข้อมูล'}</td></tr>
+              <tr><td colSpan={10} className="text-center py-8 text-slate-500">{q ? 'ไม่พบ' : 'ยังไม่มีข้อมูล'}</td></tr>
             ) : filtered.map(p => (
               <tr key={p.id} className="border-t border-slate-800 hover:bg-slate-800/30">
                 <td className="px-3 py-2 font-mono text-brand-400 font-bold whitespace-nowrap">{p.item_code}</td>
@@ -638,6 +646,7 @@ function ProductsTab({ products, customers, loading, onChanged }: {
                 <td className="px-3 py-2 font-mono text-amber-300 text-xs whitespace-nowrap">{p.mat_code || '—'}</td>
                 <td className="px-3 py-2 text-right text-cyan-300 whitespace-nowrap">{p.core_weight ? `${p.core_weight}` : '—'}</td>
                 <td className="px-3 py-2 text-right whitespace-nowrap">{(p as any).length ? <b className="text-emerald-300">{(p as any).length} M.</b> : <span className="text-slate-600">—</span>}</td>
+                <td className="px-3 py-2 font-mono text-xs whitespace-nowrap">{p.barcode_no ? <span className="text-sky-300">{p.barcode_no}</span> : <span className="text-slate-600">—</span>}</td>
                 <td className="px-3 py-2 text-slate-300">
                   <span className="text-slate-500 text-xs">{p.cust_code} </span>
                   {p.cust_name || '—'}
@@ -720,6 +729,10 @@ function ProductEditModal({ product, customers, onClose }: { product: Product; c
             <Field label="Mat Code"        value={p.mat_code ?? ''}    onChange={v => setP({ ...p, mat_code: v })} ph="60001585"/>
             <Field label="น้ำหนักแกน (kg)" value={p.core_weight ?? ''} onChange={v => setP({ ...p, core_weight: v })} ph="1.15"/>
             <Field label="ความยาว (เมตร) ✨" value={(p as any).length ?? ''} onChange={v => setP({ ...p, length: v } as any)} ph="1570"/>
+            <div className="col-span-2">
+              <Field label="Barcode No. (เลข 13 หลัก)" value={p.barcode_no ?? ''}
+                onChange={v => setP({ ...p, barcode_no: v.replace(/\D/g, '').slice(0, 13) })} ph="8850123456789"/>
+            </div>
           </div>
           <div>
             <label className="block text-[10px] text-slate-500 mb-1">ลูกค้า</label>
