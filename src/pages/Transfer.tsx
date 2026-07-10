@@ -324,7 +324,7 @@ export default function Transfer({ dept }: { dept?: 'blow'|'print'|'rewind' }) {
   // โหลดจำนวนม้วนคงค้างทุกประเภท
   // ⚠ ไม่นับม้วน review_status='pending_review' (รอ ผจก พิจารณา — ยังโอนไม่ได้)
   // ม้วนดีที่โอนได้ = ม้วนสลิทแล้ว (slit_roll) หรือม้วนดีทั่วไป (inbound_type ว่าง เช่น จากกรอ/legacy) เท่านั้น
-  // ม้วนก่อนพิมพ์ (input_roll) / ม้วนใหญ่หลังพิมพ์ (printed_jumbo) เป็นข้อมูลติดตามภายใน ไม่ส่งออกลูกค้า
+  // ม้วนใหญ่หลังพิมพ์ (printed_jumbo) เป็นข้อมูลติดตามภายใน ไม่ส่งออกลูกค้า
   function isTransferableGood(r: any) {
     return r.roll_type !== 'good' || !r.inbound_type || r.inbound_type === 'slit_roll'
   }

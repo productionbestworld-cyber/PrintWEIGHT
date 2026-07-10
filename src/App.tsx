@@ -77,7 +77,7 @@ type PendingJob = {
   created_at: string
 }
 
-function ActiveJobsPanel({ onGo }: { onGo: (page: Page) => void }) {
+function ActiveJobsPanel({ onGo }: { onGo: (page: Page, jobId?: string) => void }) {
   const [jobs, setJobs] = useState<PendingJob[] | null>(null)
 
   useEffect(() => {
@@ -106,7 +106,7 @@ function ActiveJobsPanel({ onGo }: { onGo: (page: Page) => void }) {
       ) : (
         <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
           {jobs.map(j => (
-            <button key={j.id} onClick={() => onGo('weigh')}
+            <button key={j.id} onClick={() => onGo('weigh', j.id)}
               className="text-left rounded-2xl border border-slate-700 bg-slate-900 px-4 py-3 hover:border-blue-400 transition-colors">
               <p className="text-white font-bold text-sm">
                 🖨 {j.print_machine || '—'} / {j.slit_machine || '—'}
@@ -123,7 +123,7 @@ function ActiveJobsPanel({ onGo }: { onGo: (page: Page) => void }) {
   )
 }
 
-function HomeGuide({ onGo }: { onGo: (page: Page) => void }) {
+function HomeGuide({ onGo }: { onGo: (page: Page, jobId?: string) => void }) {
   const [showHowTo, setShowHowTo] = useState(false)
   const weighSteps = [
     'รับม้วนใส / ชั่งน้ำหนักก่อนพิมพ์',
@@ -179,6 +179,7 @@ export default function App() {
 
   const [page, setPage] = useState<Page>('home')
   const [weighKey, setWeighKey] = useState(0)
+  const [pendingJobId, setPendingJobId] = useState<string | undefined>(undefined)
   const [showSettingsGate, setShowSettingsGate] = useState(false)
   const [showAbout, setShowAbout] = useState(false)
   const [updateReady, setUpdateReady] = useState(false)
@@ -264,6 +265,8 @@ export default function App() {
                 setShowSettingsGate(true)
                 return
               }
+              // กดเมนู "ชั่ง" ตรงๆ = เปิดหน้าเลือกงานปกติ (ไม่เจาะเข้างานที่ค้างจากหน้าหลัก)
+              if (key === 'weigh') { setPendingJobId(undefined); setWeighKey(k => k + 1) }
               setPage(key)
             }}
             className={`relative flex items-center gap-1.5 px-3 py-2 rounded-lg text-sm font-medium transition-colors ${
@@ -304,12 +307,12 @@ export default function App() {
       <AnnouncementBar />
 
       <main className="flex-1 overflow-auto">
-        {page === 'home' && <HomeGuide onGo={(nextPage) => {
+        {page === 'home' && <HomeGuide onGo={(nextPage, jobId) => {
           setPage(nextPage)
-          if (nextPage === 'weigh') setWeighKey(key => key + 1)
+          if (nextPage === 'weigh') { setPendingJobId(jobId); setWeighKey(key => key + 1) }
         }} />}
         {page === 'jobs' && <JobsPage />}
-        {page === 'weigh' && <WeighStation key={weighKey} dept={DEPT} />}
+        {page === 'weigh' && <WeighStation key={weighKey} dept={DEPT} initialJobId={pendingJobId} />}
         {page === 'transfer' && <Transfer dept={DEPT} />}
         {page === 'held' && <HeldRolls dept={DEPT} />}
         {page === 'settings' && <ProductionSettings />}

@@ -109,14 +109,12 @@ async function buildLabelHtml(p: MachineProfile, rollNo: number, gross: number, 
   // Barcode No. (เลข 13 หลัก) ผูกกับสินค้า — ถ้าตั้งไว้ที่ profile แล้วใช้เลย ไม่งั้น lookup จาก item_code
   const barcodeNo = String((p as any).barcodeNo ?? '').trim() || await productBarcode(p.itemCode ?? '')
   const inboundType = String((p as any).inboundType ?? '')
-  const hideLotOnLabel = rollType === 'good' && (inboundType === 'input_roll' || inboundType === 'printed_jumbo')
+  const hideLotOnLabel = rollType === 'good' && inboundType === 'printed_jumbo'
   const goodStageLabel =
-    rollType === 'good' && inboundType === 'input_roll' ? 'ม้วนก่อนพิมพ์' :
     rollType === 'good' && inboundType === 'printed_jumbo' ? 'ม้วนพิมพ์แล้ว' :
     ''
   // วันผลิต = วันที่ชั่งจริง (รีปริ้นใช้ created_at) · ถ้าไม่ส่งมา = วันนี้ (ตอนชั่ง)
   const cleanStageLabel =
-    rollType === 'good' && inboundType === 'input_roll' ? 'ม้วนก่อนพิมพ์' :
     rollType === 'good' && inboundType === 'printed_jumbo' ? 'ม้วนพิมพ์แล้ว' :
     ''
   const productionHeaderText = cleanStageLabel
@@ -2093,7 +2091,7 @@ function PrintMachinePicker({ onSelect }: { onSelect: (m: PrintMachine) => void 
           ))}
         </div>
         <div className="mt-5 rounded-2xl border border-slate-800 bg-slate-900/70 p-4 text-sm text-slate-400">
-          ความสัมพันธ์งาน: ม้วนก่อนพิมพ์ / ม้วนใหญ่หลังพิมพ์ / ม้วนสลิท จะอ้างอิงเครื่องพิมพ์ที่เลือก ร่วมกับ Lot และ WO เดียวกัน
+          ความสัมพันธ์งาน: ม้วนพิมพ์ / ม้วนสลิท จะอ้างอิงเครื่องพิมพ์ที่เลือก ร่วมกับ Lot และ WO เดียวกัน
         </div>
       </div>
     </div>
@@ -2535,14 +2533,13 @@ function WeighPage({ profile: initialProfile, onBack, asModal, printMachine }: {
     return () => window.removeEventListener('online', flushQueue)
   }, [])
 
-  type GoodMode = 'input_roll' | 'printed_jumbo' | 'slit_roll' | 'short_meter'
+  type GoodMode = 'printed_jumbo' | 'slit_roll' | 'short_meter'
   type ScrapSub = 'scrap_print_color' | 'scrap_glue' | 'scrap_slit_side'
   type BadMode = 'rework' | 'ncr'
 
   const GOOD_MODES: { key: GoodMode; label: string; hint: string }[] = [
-    { key: 'input_roll', label: 'ม้วนก่อนพิมพ์', hint: 'ชั่งม้วนวัตถุดิบก่อนนำไปพิมพ์' },
-    { key: 'printed_jumbo', label: 'ม้วนใหญ่หลังพิมพ์', hint: 'ชั่งน้ำหนักม้วนใหญ่ที่ออกจากเครื่องพิมพ์' },
-    { key: 'slit_roll', label: 'ม้วนสลิทส่งลูกค้า', hint: 'ชั่งม้วนเล็กหลังซอย และปริ้นใบลาเบลส่งลูกค้า' },
+    { key: 'printed_jumbo', label: 'ม้วนพิมพ์', hint: 'ชั่งน้ำหนักม้วนใหญ่ที่ออกจากเครื่องพิมพ์' },
+    { key: 'slit_roll', label: 'ม้วนสลิท', hint: 'ชั่งม้วนเล็กหลังซอย และปริ้นใบลาเบลส่งลูกค้า' },
     { key: 'short_meter', label: 'ม้วนเมตรไม่ถึง', hint: 'ชั่งเก็บพักไว้ก่อน รอเบิกไปต่อม้วนให้เมตรถึง' },
   ]
   const SCRAP_MODES: { key: ScrapSub; label: string; hint: string }[] = [
@@ -2560,7 +2557,7 @@ function WeighPage({ profile: initialProfile, onBack, asModal, printMachine }: {
   useEffect(() => {
     if (profile.section === 'rewind' && weighType === 'bad') setWeighType('good')
   }, [profile.section, isProductionJobFlow, weighType])
-  const [goodMode,     setGoodMode]     = useState<GoodMode>('input_roll')
+  const [goodMode,     setGoodMode]     = useState<GoodMode>('printed_jumbo')
   const [selectedInputRollId, setSelectedInputRollId] = useState('')
   // 📦 เบิกม้วนจากกล่อง "ม้วนพักไว้" (เมตรไม่ถึง/แก้ไข/NCR ของสินค้านี้ จาก WO เก่า) มาแก้แล้วชั่งเป็น WO ปัจจุบัน
   const [heldBoxRolls, setHeldBoxRolls] = useState<any[]>([])
@@ -2569,22 +2566,20 @@ function WeighPage({ profile: initialProfile, onBack, asModal, printMachine }: {
   const [badReason,    setBadReason]    = useState('')
   const goodModeOfRoll = (r: any): GoodMode => {
     const value = String(r?.inbound_type ?? '')
-    return value === 'printed_jumbo' || value === 'slit_roll' || value === 'input_roll' || value === 'short_meter' ? value : 'slit_roll'
+    return value === 'printed_jumbo' || value === 'slit_roll' || value === 'short_meter' ? value : 'slit_roll'
   }
   const goodRows = weighedRolls.filter((r:any)=>r?.roll_type==='good')
-  const inputRollRows = goodRows.filter((r:any) => goodModeOfRoll(r) === 'input_roll')
   const printedJumboRows = goodRows.filter((r:any) => goodModeOfRoll(r) === 'printed_jumbo')
-  const needsSourceRoll = isProductionJobFlow && (goodMode === 'printed_jumbo' || goodMode === 'slit_roll' || goodMode === 'short_meter')
-  const sourceRollRows = goodMode === 'printed_jumbo' ? inputRollRows : (goodMode === 'slit_roll' || goodMode === 'short_meter') ? printedJumboRows : []
+  // สลิท/เมตรไม่ถึง อ้างอิงม้วนพิมพ์แล้ว (printed_jumbo) เป็นต้นทาง · ม้วนพิมพ์แล้วเป็นขั้นแรก ไม่มีต้นทาง
+  const needsSourceRoll = isProductionJobFlow && (goodMode === 'slit_roll' || goodMode === 'short_meter')
+  const sourceRollRows = needsSourceRoll ? printedJumboRows : []
   const sourceRollById = new Map(sourceRollRows.map((r:any) => [r.id, r]))
   const selectedInputRoll = selectedInputRollId ? sourceRollById.get(selectedInputRollId) : null
   const withdrawnHeld = withdrawnHeldId ? heldBoxRolls.find((r:any) => r.id === withdrawnHeldId) : null
   // ม้วนต้นทางที่จะผูก = ม้วนที่เบิกจากกล่อง (ถ้ามี) มาก่อน · ไม่งั้นใช้ม้วนต้นทางในงาน
   const effectiveSourceRoll = withdrawnHeld ?? selectedInputRoll
-  const sourceRollLabel = goodMode === 'printed_jumbo' ? 'ม้วนก่อนพิมพ์' : 'ม้วนพิมพ์แล้ว'
-  const sourceRollHint = goodMode === 'printed_jumbo'
-    ? 'เลือกม้วนก่อนพิมพ์ที่นำไปพิมพ์ (ไม่บังคับ — ไม่เลือกก็ชั่งได้)'
-    : 'เลือกม้วนพิมพ์แล้วที่นำมาสลิท (ไม่บังคับ — ไม่เลือกก็ชั่งได้)'
+  const sourceRollLabel = 'ม้วนพิมพ์แล้ว'
+  const sourceRollHint = 'เลือกม้วนพิมพ์แล้วที่นำมาสลิท (ไม่บังคับ — ไม่เลือกก็ชั่งได้)'
   const visibleGoodRows = isProductionJobFlow ? goodRows.filter((r:any)=>goodModeOfRoll(r) === goodMode) : goodRows
   const visibleGoodKg = visibleGoodRows.reduce((s:number,r:any)=>s+(r?.weight??0),0)
   const visibleGoodModeInfo = GOOD_MODES.find(m => m.key === goodMode) ?? GOOD_MODES[0]
@@ -2806,12 +2801,6 @@ function WeighPage({ profile: initialProfile, onBack, asModal, printMachine }: {
   const yieldPct  = totalProduced > 0 ? Math.round(goodKg / totalProduced * 100) : 0
   const flowRows = [
     {
-      label: 'ม้วนก่อนพิมพ์',
-      rows: goodRolls.filter((r:any) => (r.inbound_type ?? 'slit_roll') === 'input_roll'),
-      tone: 'text-sky-300',
-      printColor: '#0369a1',
-    },
-    {
       label: 'เศษพิมพ์ / เศษสี',
       rows: scrapRolls.filter((r:any) => r.roll_type === 'scrap_print_color'),
       tone: 'text-amber-300',
@@ -2824,7 +2813,7 @@ function WeighPage({ profile: initialProfile, onBack, asModal, printMachine }: {
       printColor: '#d97706',
     },
     {
-      label: 'ม้วนใหญ่ที่พิมพ์ได้',
+      label: 'ม้วนพิมพ์',
       rows: goodRolls.filter((r:any) => r.inbound_type === 'printed_jumbo'),
       tone: 'text-purple-300',
       printColor: '#7e22ce',
@@ -2836,7 +2825,7 @@ function WeighPage({ profile: initialProfile, onBack, asModal, printMachine }: {
       printColor: '#ea580c',
     },
     {
-      label: 'ม้วนสำเร็จหลังสลิท',
+      label: 'ม้วนสลิท',
       rows: goodRolls.filter((r:any) => (r.inbound_type ?? 'slit_roll') === 'slit_roll'),
       tone: 'text-green-300',
       printColor: '#15803d',
@@ -2849,15 +2838,17 @@ function WeighPage({ profile: initialProfile, onBack, asModal, printMachine }: {
     },
   ]
   const sumRowsKg = (rows: any[]) => rows.reduce((s:number,r:any)=>s+(r.weight??0),0)
-  const inputRollKg = sumRowsKg(flowRows[0].rows)
-  const printScrapKg = sumRowsKg(flowRows[1].rows)
-  const glueScrapKg = sumRowsKg(flowRows[2].rows)
-  const printedJumboKg = sumRowsKg(flowRows[3].rows)
-  const slitSideScrapKg = sumRowsKg(flowRows[4].rows)
-  const slitFinishedKg = sumRowsKg(flowRows[5].rows)
+  // คิดจาก filter ตรงๆ (ไม่ยึด index ของ flowRows) — กันพังเวลาปรับลำดับ/ลบขั้น
+  const slitFinishedRows = goodRolls.filter((r:any) => (r.inbound_type ?? 'slit_roll') === 'slit_roll')
+  const printScrapKg = sumRowsKg(scrapRolls.filter((r:any) => r.roll_type === 'scrap_print_color'))
+  const glueScrapKg = sumRowsKg(scrapRolls.filter((r:any) => r.roll_type === 'scrap_glue'))
+  const slitSideScrapKg = sumRowsKg(scrapRolls.filter((r:any) => r.roll_type === 'scrap_slit_side'))
+  const printedJumboKg = sumRowsKg(printedJumboRows)
+  const slitFinishedKg = sumRowsKg(slitFinishedRows)
   const printLossKg = printScrapKg + glueScrapKg
   const slitLossKg = slitSideScrapKg
-  const finalYieldPct = inputRollKg > 0 ? Math.round((slitFinishedKg / inputRollKg) * 100) : yieldPct
+  // Yield = ม้วนสำเร็จหลังสลิท เทียบ ม้วนใหญ่หลังพิมพ์ (ขั้นแรกแล้ว)
+  const finalYieldPct = printedJumboKg > 0 ? Math.round((slitFinishedKg / printedJumboKg) * 100) : yieldPct
   const flowRowsHtml = flowRows.map(row => {
     const kg = sumRowsKg(row.rows)
     return `<div class="row"><span>${row.label}</span><b style="color:${row.printColor}">${kg.toLocaleString('th-TH',{minimumFractionDigits:2})} Kgs. (${row.rows.length} รายการ)</b></div>`
@@ -3079,9 +3070,9 @@ body{font-family:'Sarabun','Tahoma',sans-serif;font-size:11pt;color:#000;padding
     setSaving(true)
     try {
       const actualType = isScrap ? scrapSub : weighType
-      // เฉพาะงานที่มาจาก "ตั้งงาน" (3 สเตจ ก่อนพิมพ์/หลังพิมพ์/สลิท) เท่านั้นที่บันทึกสเตจ
-      // งานอื่น (กรอ/legacy) ไม่เกี่ยวกับ 3 สเตจนี้ → inbound_type ต้องเป็น null (ไม่งั้นค่า default 'input_roll'
-      // จะติดไปกับม้วนดีทั่วไป ทำให้หน้าโอนกรองผิด — ม้วนกรอเสร็จโอนไม่ได้)
+      // เฉพาะงานที่มาจาก "ตั้งงาน" (สเตจ หลังพิมพ์/สลิท/เมตรไม่ถึง) เท่านั้นที่บันทึกสเตจ
+      // งานอื่น (กรอ/legacy) ไม่เกี่ยวกับสเตจพวกนี้ → inbound_type ต้องเป็น null
+      // (ไม่งั้นค่าสเตจจะติดไปกับม้วนดีทั่วไป ทำให้หน้าโอนกรองผิด — ม้วนกรอเสร็จโอนไม่ได้)
       const goodInboundType = (isGood && isProductionJobFlow) ? goodMode : null
       // ม้วนต้นทาง: ม้วนที่เบิกจากกล่อง (ข้าม WO) มาก่อน · ไม่งั้นใช้ม้วนต้นทางในงาน
       const productionSourceRoll = isGood ? (withdrawnHeld ?? (needsSourceRoll ? selectedInputRoll : null)) : null
@@ -3620,7 +3611,7 @@ body{font-family:'Sarabun','Tahoma',sans-serif;font-size:11pt;color:#000;padding
             const isHeldTab = isBad || (isGood && goodMode === 'short_meter')
             return (
               <div className={`grid ${profile.section === 'rewind' ? 'grid-cols-2' : 'grid-cols-3'} gap-1.5`}>
-                <button onClick={() => { setWeighType('good'); if (goodMode === 'short_meter') setGoodMode('input_roll') }}
+                <button onClick={() => { setWeighType('good'); if (goodMode === 'short_meter') setGoodMode('printed_jumbo') }}
                   className={`py-2.5 rounded-xl text-sm font-bold transition-colors text-center ${isStageTab ? 'bg-brand-600 text-white' : 'bg-slate-800 text-slate-400 hover:text-white'}`}>
                   งานชั่ง
                 </button>
@@ -4193,21 +4184,16 @@ body{font-family:'Sarabun','Tahoma',sans-serif;font-size:11pt;color:#000;padding
 
           {isProductionJobFlow && (
             <div className="shrink-0 border-b border-slate-800 bg-slate-950/40 p-3 space-y-2">
-              <div className="grid grid-cols-4 gap-2">
-                <div className="rounded-xl border border-sky-500/25 bg-sky-500/10 px-3 py-2">
-                  <p className="text-sky-300 text-[10px] font-bold">ม้วนก่อนพิมพ์</p>
-                  <p className="text-white font-black text-lg">{fmt(inputRollKg, dec)} <span className="text-xs text-slate-400">Kgs.</span></p>
-                  <p className="text-slate-500 text-[10px]">{flowRows[0].rows.length} ม้วน</p>
-                </div>
+              <div className="grid grid-cols-3 gap-2">
                 <div className="rounded-xl border border-purple-500/25 bg-purple-500/10 px-3 py-2">
-                  <p className="text-purple-300 text-[10px] font-bold">ม้วนใหญ่หลังพิมพ์</p>
+                  <p className="text-purple-300 text-[10px] font-bold">ม้วนพิมพ์</p>
                   <p className="text-white font-black text-lg">{fmt(printedJumboKg, dec)} <span className="text-xs text-slate-400">Kgs.</span></p>
-                  <p className="text-slate-500 text-[10px]">{flowRows[3].rows.length} ม้วน</p>
+                  <p className="text-slate-500 text-[10px]">{printedJumboRows.length} ม้วน</p>
                 </div>
                 <div className="rounded-xl border border-green-500/25 bg-green-500/10 px-3 py-2">
-                  <p className="text-green-300 text-[10px] font-bold">ม้วนสลิทส่งลูกค้า</p>
+                  <p className="text-green-300 text-[10px] font-bold">ม้วนสลิท</p>
                   <p className="text-white font-black text-lg">{fmt(slitFinishedKg, dec)} <span className="text-xs text-slate-400">Kgs.</span></p>
-                  <p className="text-slate-500 text-[10px]">{flowRows[5].rows.length} ม้วน</p>
+                  <p className="text-slate-500 text-[10px]">{slitFinishedRows.length} ม้วน</p>
                 </div>
                 <div className="rounded-xl border border-amber-500/25 bg-amber-500/10 px-3 py-2">
                   <p className="text-amber-300 text-[10px] font-bold">เศษรวม</p>
@@ -4216,7 +4202,7 @@ body{font-family:'Sarabun','Tahoma',sans-serif;font-size:11pt;color:#000;padding
                 </div>
               </div>
               <div className="grid grid-cols-3 gap-2">
-                {flowRows.slice(1, 3).concat(flowRows.slice(4, 5)).map(row => (
+                {flowRows.filter(row => row.label.startsWith('เศษ')).map(row => (
                   <div key={row.label} className="rounded-xl border border-slate-700 bg-slate-900 px-3 py-2 flex items-center justify-between gap-2">
                     <span className="text-slate-300 text-xs font-bold">{row.label}</span>
                     <span className={`${row.tone} text-xs font-black whitespace-nowrap`}>{fmt(sumRowsKg(row.rows), dec)} Kgs. ({row.rows.length})</span>
@@ -4483,7 +4469,7 @@ body{font-family:'Sarabun','Tahoma',sans-serif;font-size:11pt;color:#000;padding
                 <div className="bg-brand-500/10 border border-brand-500/25 rounded-xl p-3 text-center">
                   <p className="text-brand-400 text-[10px]">Yield</p>
                   <p className="text-brand-300 font-black text-xl">{finalYieldPct}%</p>
-                  <p className="text-slate-500 text-[9px]">เทียบม้วนก่อนพิมพ์</p>
+                  <p className="text-slate-500 text-[9px]">เทียบม้วนพิมพ์</p>
                 </div>
               </div>
 
@@ -4710,9 +4696,22 @@ body{font-family:'Sarabun','Tahoma',sans-serif;font-size:11pt;color:#000;padding
   )
 }
 
-export default function WeighStation({ dept }: { dept?: 'blow' | 'print' | 'rewind' }) {
+export default function WeighStation({ dept, initialJobId }: { dept?: 'blow' | 'print' | 'rewind'; initialJobId?: string }) {
   const [selected, setSelected] = useState<MachineProfile | null>(null)
   const [selectedPrintMachine, setSelectedPrintMachine] = useState<PrintMachine | null>(null)
+
+  // เปิดจากหน้าหลัก (กดงานที่ค้างไว้) → ดึงงานนั้นมาเปิดชั่งเลย ข้ามหน้าเลือกงาน
+  useEffect(() => {
+    if (dept !== 'print' || !initialJobId) return
+    let alive = true
+    supabase.from('production_jobs').select('*').eq('id', initialJobId).maybeSingle()
+      .then(({ data }) => {
+        if (!alive || !data) return
+        setSelectedPrintMachine(printMachineFromJob(data as ProductionJob))
+        setSelected(jobToProfile(data as ProductionJob))
+      })
+    return () => { alive = false }
+  }, [dept, initialJobId])
   const [profiles, setProfiles] = useState<MachineProfile[]>(loadProfiles())
   const [jumpHistory, setJumpHistory] = useState(0)   // บั๊มพ์ → สั่งรายการงานสลับไปแท็บ "ประวัติกรอ" หลังชั่งเสร็จ
 
