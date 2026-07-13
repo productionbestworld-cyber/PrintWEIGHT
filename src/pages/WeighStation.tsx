@@ -3059,7 +3059,6 @@ body{font-family:'Sarabun','Tahoma',sans-serif;font-size:11pt;color:#000;padding
     // หมายเหตุ: เลือกม้วนต้นทาง (needsSourceRoll) เป็นตัวเลือกเสริมสำหรับ traceability เท่านั้น — ไม่บังคับ
     // ยอดรวมแต่ละขั้น (ก่อนพิมพ์/หลังพิมพ์/สลิท/เศษ) คำนวณจาก lot_no/work_order อยู่แล้ว ไม่ต้องผูกม้วนทีละใบ
     if (isBad && !badReason.trim()) { alert('กรุณาระบุเหตุผลม้วนกรอ'); return }
-    if (isScrap && !scrapReason.trim()) { alert('กรุณาระบุเหตุผลเศษเสีย'); return }
     if (isGood && isRework && srcRolls.length > 0 && !selSrc && !manualMode) { alert('กรุณาเลือกม้วนต้นทางที่กำลังกรอก่อน (ติ๊กด้านบน) หรือกด ➕ ม้วนนอกระบบ'); return }
     if (isGood && isRework && manualMode && !manualSrcText.trim()) { alert('กรุณากรอกที่มาของม้วนนอกระบบ'); return }
     if (isGood && isRework && selSrc && ((selSrc.weight ?? 0) - (srcProg[selSrc.id] ?? 0)) <= 0.001) {
@@ -3801,7 +3800,7 @@ body{font-family:'Sarabun','Tahoma',sans-serif;font-size:11pt;color:#000;padding
           {/* Scrap reason */}
           {isScrap && (
             <input value={scrapReason} onChange={e => setScrapReason(e.target.value)}
-              placeholder="เหตุผลเศษเสีย (จำเป็น)..."
+              placeholder="เหตุผลเศษเสีย (ไม่บังคับ)..."
               className="w-full bg-slate-800 border border-red-500/40 rounded-xl px-3 py-2 text-sm text-white outline-none focus:border-red-500 placeholder-slate-500" />
           )}
 
@@ -4060,7 +4059,7 @@ body{font-family:'Sarabun','Tahoma',sans-serif;font-size:11pt;color:#000;padding
                 </span>
               </div>
             )}
-            <button onClick={handleSave} disabled={saving || awaitingClear || saveWeight <= 0 || !stable || (isBad && !badReason.trim()) || (isScrap && !scrapReason.trim()) || (isGood && isRework && !reworkCause.trim())}
+            <button onClick={handleSave} disabled={saving || awaitingClear || saveWeight <= 0 || !stable || (isBad && !badReason.trim()) || (isGood && isRework && !reworkCause.trim())}
               className={`flex-1 py-3 rounded-xl text-white font-black flex items-center justify-center gap-2 transition-all active:scale-95 disabled:opacity-40 ${
                 awaitingClear ? 'bg-slate-700 cursor-not-allowed' :
                 !stable ? 'bg-slate-700 cursor-not-allowed' :
@@ -4084,12 +4083,11 @@ body{font-family:'Sarabun','Tahoma',sans-serif;font-size:11pt;color:#000;padding
           )}
 
           {/* hint ทำไมกดไม่ได้ */}
-          {!awaitingClear && (saveWeight <= 0 || !stable || (isBad && !badReason.trim()) || (isScrap && !scrapReason.trim()) || (isGood && isRework && !reworkCause.trim())) && (
+          {!awaitingClear && (saveWeight <= 0 || !stable || (isBad && !badReason.trim()) || (isGood && isRework && !reworkCause.trim())) && (
             <p className="text-center text-slate-600 text-xs">
               {!stable ? '⟳ รอค่าชั่งนิ่งก่อน' :
                saveWeight <= 0 ? '▲ พิมพ์น้ำหนักหรือกดสุ่มค่าก่อน' :
                isBad && !badReason.trim() ? '▲ กรอกเหตุผลม้วนแก้ไข/NCR ก่อน' :
-               isScrap && !scrapReason.trim() ? '▲ กรอกเหตุผลเศษเสียก่อน' :
                isGood && isRework && !reworkCause.trim() ? '▲ กรอกสาเหตุที่ม้วนนี้เสียก่อน' : ''}
             </p>
           )}
