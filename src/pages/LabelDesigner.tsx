@@ -244,7 +244,7 @@ export const DEFAULT_LAYOUT_SHORT: LabelLayout = {
     { id:'gross', label:'Gross Weight', sampleValue:'Gross 27.00 Kgs.',
       x:2, y:58.5, w:40, h:4, fontSize:8, fontWeight:'700', align:'left',
       visible:true, type:'text', border:false, italic:false },
-    { id:'barcode_lbl', label:'Barcode No. (เลข 13 หลัก)', sampleValue:'Barcode  8850123456789',
+    { id:'barcode_lbl', label:'Barcode No.', sampleValue:'Barcode  8850123456789',
       x:2, y:62.8, w:50, h:4, fontSize:8, fontWeight:'700', align:'left',
       visible:true, type:'text', border:false, italic:false },
     { id:'qr', label:'QR Code', sampleValue:'QR',

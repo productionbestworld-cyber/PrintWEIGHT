@@ -28,6 +28,7 @@ type Job = {
   delivery_date?: string
   note?: string
   created_by?: string
+  header_text?: string   // ชื่อบริษัทบนใบปะหน้า (เว้นว่าง = ใช้ชื่อปกติ เบสท์เวิลด์ฯ)
 }
 
 const emptyJob: Job = {
@@ -36,7 +37,7 @@ const emptyJob: Job = {
   work_order: '',
   lot_no: '',
   print_machine: 'P1',
-  slit_machine: 'SL1',
+  slit_machine: '',
   customer: '',
   cust_code: '',
   item_code: '',
@@ -44,10 +45,19 @@ const emptyJob: Job = {
   planned_qty: '',
   delivery_date: '',
   note: '',
+  header_text: '',
 }
 
 const PRINT_MACHINES = ['P1', 'P2', 'P3']
 const SLIT_MACHINES = ['SL1', 'SL2', 'SL3', 'SL4']
+
+// ชื่อบริษัทบนใบปะหน้า — งานบางตัวต้องพิมพ์ในนามบริษัทอื่น (private label)
+// value ว่าง = ใช้ชื่อปกติ (บริษัท เบสท์เวิลด์ อินเตอร์พลาส จำกัด)
+const COMPANY_OPTIONS = [
+  { value: '', label: 'บริษัท เบสท์เวิลด์ อินเตอร์พลาส จำกัด (ปกติ)' },
+  { value: 'บริษัท แอดวานซ์ โนเลดจ์ เซอร์วิสเซส จำกัด', label: 'บริษัท แอดวานซ์ โนเลดจ์ เซอร์วิสเซส จำกัด (C0012)' },
+  { value: 'บริษัท เจ.เอส. อุตสาหกรรมพลาสติก จำกัด', label: 'บริษัท เจ.เอส. อุตสาหกรรมพลาสติก จำกัด (C0013)' },
+]
 
 function lotYearMonth(dateText?: string) {
   const date = dateText ? new Date(`${dateText}T00:00:00`) : new Date()
@@ -61,11 +71,14 @@ function cleanProductCode(code?: string) {
   return (code ?? '').trim().toUpperCase().replace(/[^A-Z0-9]/g, '')
 }
 
+// เครื่องสลิตไม่บังคับตอนตั้งงาน → ถ้ายังไม่เลือก จะได้ "lot ยังไม่ครบ" ใส่ __ แทน SL#
+// เช่น 69__P1TC00107 · เมื่อเลือกเครื่องสลิตตอนชั่งสลิต จะเติม SL# ให้ครบเป็น 69SL1P1TC00107
 function genLotNo(job: Job) {
   const productCode = cleanProductCode(job.product_code || job.item_code)
-  if (!job.slit_machine || !job.print_machine || !productCode) return ''
+  if (!job.print_machine || !productCode) return ''
   const { yy, mm } = lotYearMonth(job.delivery_date)
-  return `${yy}${job.slit_machine}${job.print_machine}${productCode}${mm}`
+  const slit = (job.slit_machine || '').trim() || '__'
+  return `${yy}${slit}${job.print_machine}${productCode}${mm}`
 }
 
 function withAutoLot(prev: Job, next: Job) {
@@ -204,6 +217,8 @@ export default function JobsPage() {
       delivery_date: form.delivery_date || null,
       note: form.note?.trim() || null,
       created_by: form.created_by?.trim() || null,
+      // ใส่เฉพาะเมื่อมีค่า → งานปกติไม่ส่ง key นี้ (ไม่ต้องมีคอลัมน์ก็ตั้งงานได้)
+      ...(form.header_text?.trim() ? { header_text: form.header_text.trim() } : {}),
     }
     const req = form.id
       ? supabase.from('production_jobs').update(payload).eq('id', form.id)
@@ -237,8 +252,15 @@ export default function JobsPage() {
             <div className="grid grid-cols-2 gap-3">
               <Input label="SO" value={form.sale_order ?? ''} onChange={v => setForm(p => ({ ...p, sale_order: v }))} />
               <Input label="WO *" value={form.work_order ?? ''} onChange={v => setForm(p => ({ ...p, work_order: v }))} />
-              <Select label="เครื่องสลิท" value={form.slit_machine ?? ''} options={SLIT_MACHINES} onChange={v => setForm(p => withAutoLot(p, { ...p, slit_machine: v }))} />
-              <Select label="เครื่องพิมพ์" value={form.print_machine ?? ''} options={PRINT_MACHINES} onChange={v => setForm(p => withAutoLot(p, { ...p, print_machine: v }))} />
+              <Select label="เครื่องพิมพ์ *" value={form.print_machine ?? ''} options={PRINT_MACHINES} onChange={v => setForm(p => withAutoLot(p, { ...p, print_machine: v }))} />
+              <label className="block">
+                <span className="text-[10px] text-slate-500 font-bold">เครื่องสลิท (เลือกตอนชั่งสลิตได้)</span>
+                <select value={form.slit_machine ?? ''} onChange={e => setForm(p => withAutoLot(p, { ...p, slit_machine: e.target.value }))}
+                  className="mt-1 w-full bg-slate-800 border border-slate-700 rounded-xl px-3 py-2 text-white text-sm">
+                  <option value="">— ยังไม่กำหนด (เลือกตอนชั่งสลิต) —</option>
+                  {SLIT_MACHINES.map(m => <option key={m} value={m}>{m}</option>)}
+                </select>
+              </label>
               <label className="block col-span-2">
                 <span className="text-[10px] text-slate-500 font-bold">Lot *</span>
                 <div className="mt-1 flex gap-2">
@@ -250,7 +272,7 @@ export default function JobsPage() {
                     <Wand2 size={14}/> เจน
                   </button>
                 </div>
-                <p className="text-[10px] text-slate-500 mt-1">สูตร: ปี + เครื่องสลิท + เครื่องพิมพ์ + รหัสสินค้า + เดือน เช่น 69SL1P1TC00107</p>
+                <p className="text-[10px] text-slate-500 mt-1">สูตร: ปี + (เครื่องสลิท) + เครื่องพิมพ์ + รหัสสินค้า + เดือน · ยังไม่เลือกสลิต = lot ยังไม่ครบ 69__P1TC00107 → เติมเป็น 69SL1P1TC00107 ตอนชั่งสลิต</p>
               </label>
               <Input label="จำนวนสั่ง Kg" value={form.planned_qty ?? ''} onChange={v => setForm(p => ({ ...p, planned_qty: v }))} />
             </div>
@@ -282,6 +304,14 @@ export default function JobsPage() {
               <Input label="วันส่ง" type="date" value={form.delivery_date ?? ''} onChange={v => setForm(p => withAutoLot(p, { ...p, delivery_date: v }))} />
               <Input label="ผู้ตั้งงาน" value={form.created_by ?? ''} onChange={v => setForm(p => ({ ...p, created_by: v }))} />
             </div>
+            <label className="block">
+              <span className="text-[10px] text-slate-500 font-bold">ชื่อบริษัทบนใบปะหน้า</span>
+              <select value={form.header_text ?? ''} onChange={e => setForm(p => ({ ...p, header_text: e.target.value }))}
+                className="mt-1 w-full bg-slate-800 border border-slate-700 rounded-xl px-3 py-2 text-white text-sm">
+                {COMPANY_OPTIONS.map(c => <option key={c.value} value={c.value}>{c.label}</option>)}
+              </select>
+              <p className="text-[10px] text-amber-300/70 mt-1">เลือกบริษัทอื่นเมื่องานนี้ต้องพิมพ์ในนามบริษัทอื่น — จะขึ้นหัวใบม้วนสลิต (ส่งลูกค้า)</p>
+            </label>
             <label className="block">
               <span className="text-[10px] text-slate-500 font-bold">หมายเหตุ</span>
               <textarea value={form.note ?? ''} onChange={e => setForm(p => ({ ...p, note: e.target.value }))}

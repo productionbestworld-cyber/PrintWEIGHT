@@ -1,16 +1,17 @@
 import { useCallback, useEffect, useState } from 'react'
-import { AlertTriangle, Boxes, BriefcaseBusiness, Home, Package, Scale, Settings, Wifi, WifiOff } from 'lucide-react'
+import { AlertTriangle, Boxes, BriefcaseBusiness, ClipboardList, Home, Package, Printer, Scale, Settings, Wifi, WifiOff } from 'lucide-react'
 import { supabase } from './lib/supabase'
 import JobsPage from './pages/Jobs'
 import WeighStation from './pages/WeighStation'
 import Transfer from './pages/Transfer'
 import HeldRolls from './pages/HeldRolls'
+import WeighLog from './pages/WeighLog'
 import ProductionSettings from './pages/ProductionSettings'
 import RollDetail from './pages/RollDetail'
 import { PinGate as AdminPinGate, fetchSetting, isAdminUnlocked } from './pages/Admin'
 import { APP_BUILD_DATE, APP_VERSION, CHANGELOG } from './version'
 
-type Page = 'home' | 'jobs' | 'weigh' | 'transfer' | 'held' | 'settings'
+type Page = 'home' | 'jobs' | 'weighprint' | 'weigh' | 'transfer' | 'held' | 'log' | 'settings'
 type Dept = 'print'
 type ConnStatus = 'online' | 'offline' | 'checking' | 'slow'
 
@@ -19,9 +20,11 @@ const DEPT: Dept = 'print'
 const NAV = [
   { key: 'home', label: 'หน้าแรก', icon: Home },
   { key: 'jobs', label: 'ตั้งงาน', icon: BriefcaseBusiness },
-  { key: 'weigh', label: 'ชั่ง', icon: Scale },
+  { key: 'weighprint', label: 'ชั่งพิมพ์', icon: Printer },
+  { key: 'weigh', label: 'ชั่งสลิท', icon: Scale },
   { key: 'transfer', label: 'โอน', icon: Package },
   { key: 'held', label: 'ม้วนพักไว้', icon: Boxes },
+  { key: 'log', label: 'Log ชั่ง', icon: ClipboardList },
   { key: 'settings', label: 'ตั้งค่า', icon: Settings },
 ] as const
 
@@ -266,8 +269,8 @@ export default function App() {
                 setShowSettingsGate(true)
                 return
               }
-              // กดเมนู "ชั่ง" ตรงๆ = เปิดหน้าเลือกงานปกติ (ไม่เจาะเข้างานที่ค้างจากหน้าหลัก)
-              if (key === 'weigh') { setPendingJobId(undefined); setWeighKey(k => k + 1) }
+              // กดเมนู "ชั่ง"/"ชั่งพิมพ์" ตรงๆ = เปิดหน้าเลือกงานปกติ (ไม่เจาะเข้างานที่ค้างจากหน้าหลัก)
+              if (key === 'weigh' || key === 'weighprint') { setPendingJobId(undefined); setWeighKey(k => k + 1) }
               setPage(key)
             }}
             className={`relative flex items-center gap-1.5 px-3 py-2 rounded-lg text-sm font-medium transition-colors ${
@@ -313,9 +316,11 @@ export default function App() {
           if (nextPage === 'weigh') { setPendingJobId(jobId); setWeighKey(key => key + 1) }
         }} />}
         {page === 'jobs' && <JobsPage />}
+        {page === 'weighprint' && <WeighStation key={`print-${weighKey}`} dept={DEPT} printOnly />}
         {page === 'weigh' && <WeighStation key={weighKey} dept={DEPT} initialJobId={pendingJobId} />}
         {page === 'transfer' && <Transfer dept={DEPT} />}
         {page === 'held' && <HeldRolls dept={DEPT} />}
+        {page === 'log' && <WeighLog />}
         {page === 'settings' && <ProductionSettings />}
       </main>
 

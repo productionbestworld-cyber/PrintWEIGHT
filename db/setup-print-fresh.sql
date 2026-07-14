@@ -349,6 +349,10 @@ ALTER TABLE production_jobs ENABLE ROW LEVEL SECURITY;
 DROP POLICY IF EXISTS "production_jobs_all" ON production_jobs;
 CREATE POLICY "production_jobs_all" ON production_jobs FOR ALL USING (true) WITH CHECK (true);
 
+-- ชื่อบริษัทบนใบปะหน้า (บางงานพิมพ์ในนามบริษัทอื่น) — ตั้งตอนตั้งงาน + เก็บติดม้วนไว้รีปริ้น
+ALTER TABLE production_jobs  ADD COLUMN IF NOT EXISTS header_text TEXT;
+ALTER TABLE production_rolls ADD COLUMN IF NOT EXISTS header_text TEXT;
+
 -- เชื่อมม้วนกับงาน (production_rolls.job_id → production_jobs.id) — WeighStation.tsx เขียนคอลัมน์นี้ตอนบันทึกม้วน
 ALTER TABLE production_rolls DROP CONSTRAINT IF EXISTS production_rolls_job_id_fkey;
 ALTER TABLE production_rolls ADD CONSTRAINT production_rolls_job_id_fkey

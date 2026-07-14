@@ -57,7 +57,7 @@ export interface Product {
   core_weight?:  string
   length?:       string   // ความยาว (เมตร) — ผูกกับสินค้า (item_code) ✨
   pcs?:          string
-  barcode_no?:   string   // Barcode No. (เลข 13 หลัก) — แสดงบนใบปะหน้า
+  barcode_no?:   string   // Barcode No. — แสดงบนใบปะหน้า (ไม่จำกัดจำนวนหลัก)
   cust_code:     string
   // join-ed (จาก view products_with_customer)
   cust_name?:    string
@@ -730,8 +730,8 @@ function ProductEditModal({ product, customers, onClose }: { product: Product; c
             <Field label="น้ำหนักแกน (kg)" value={p.core_weight ?? ''} onChange={v => setP({ ...p, core_weight: v })} ph="1.15"/>
             <Field label="ความยาว (เมตร) ✨" value={(p as any).length ?? ''} onChange={v => setP({ ...p, length: v } as any)} ph="1570"/>
             <div className="col-span-2">
-              <Field label="Barcode No. (เลข 13 หลัก)" value={p.barcode_no ?? ''}
-                onChange={v => setP({ ...p, barcode_no: v.replace(/\D/g, '').slice(0, 13) })} ph="8850123456789"/>
+              <Field label="Barcode No." value={p.barcode_no ?? ''}
+                onChange={v => setP({ ...p, barcode_no: v.replace(/\D/g, '') })} ph="8850123456789"/>
             </div>
           </div>
           <div>

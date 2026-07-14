@@ -7,7 +7,7 @@ import { loadProfiles, saveProfiles, fmtSize, convertWidth, type MachineProfile 
 import ReworkJobList from './ReworkJobList'
 import { loadLongLayout, loadShortLayout, loadWasteLayout, type FieldConfig } from './LabelDesigner'
 import { fetchProducts, backfillProductMatCore, backfillCustomer, addProductIfMissing, type Product } from './Products'
-import { fetchFlag, fetchSetting } from './Admin'
+import { fetchFlag, fetchSetting, isAdminUnlocked, PinGate } from './Admin'
 import ReworkInbox from './ReworkInbox'
 import ExportButton from '../components/ExportButton'
 
@@ -67,6 +67,7 @@ function rollToProfile(roll: any, size: 'long' | 'short' = 'short'): any {
     soNo:        roll.sale_order   ?? '',
     woNo:        roll.work_order   ?? '',
     inboundType: roll.inbound_type  ?? '',
+    headerText:  roll.header_text  ?? '',   // ชื่อบริษัทบนใบ (งานที่ตั้งชื่อบริษัทอื่น) — รีปริ้นก็ได้
   }
 }
 
@@ -83,7 +84,7 @@ async function machineDecimal(machineNo: string): Promise<number> {
   } catch { return 2 }
 }
 
-// Barcode No. (เลข 13 หลัก) ผูกกับสินค้า (item_code) — cache กัน query ซ้ำ
+// Barcode No. ผูกกับสินค้า (item_code) — cache กัน query ซ้ำ
 const _barcodeCache: Record<string, string> = {}
 async function productBarcode(itemCode: string): Promise<string> {
   const ic = (itemCode ?? '').trim()
@@ -106,7 +107,7 @@ export async function reprintRollLabel(roll: any, size: 'long' | 'short' = 'shor
 
 async function buildLabelHtml(p: MachineProfile, rollNo: number, gross: number, net: number, size: 'long'|'short' = 'short', rollType: string = 'good', reason = '', rollId?: string, prodDate?: string | Date | null): Promise<{ innerHtml: string; W: number; H: number }> {
   const dec     = p.decimal
-  // Barcode No. (เลข 13 หลัก) ผูกกับสินค้า — ถ้าตั้งไว้ที่ profile แล้วใช้เลย ไม่งั้น lookup จาก item_code
+  // Barcode No. ผูกกับสินค้า — ถ้าตั้งไว้ที่ profile แล้วใช้เลย ไม่งั้น lookup จาก item_code
   const barcodeNo = String((p as any).barcodeNo ?? '').trim() || await productBarcode(p.itemCode ?? '')
   const inboundType = String((p as any).inboundType ?? '')
   const hideLotOnLabel = rollType === 'good' && inboundType === 'printed_jumbo'
@@ -207,7 +208,7 @@ async function buildLabelHtml(p: MachineProfile, rollNo: number, gross: number, 
         return `<img src="${qrUrl(qrSize)}" width="${px}" height="${px}" style="position:absolute;left:${f.x}mm;top:${f.y}mm;width:${f.w}mm;height:${f.h}mm;image-rendering:pixelated"/>`
       }
 
-      // barcode: ภาพ Code128 ของเลข 13 หลัก (มีตัวเลขกำกับใต้แท่ง) — ว่าง = ไม่แสดง
+      // barcode: ภาพ Code128 (มีตัวเลขกำกับใต้แท่ง, ความยาวไม่จำกัด) — ว่าง = ไม่แสดง
       if ((f as any).type === 'barcode') {
         const code = dataMap[f.id] ?? ''
         if (!code) return ''
@@ -1920,6 +1921,7 @@ type ProductionJob = {
   planned_qty?: string | null
   delivery_date?: string | null
   created_by?: string | null
+  header_text?: string | null
 }
 
 function printMachineFromJob(job: ProductionJob): PrintMachine {
@@ -1928,9 +1930,31 @@ function printMachineFromJob(job: ProductionJob): PrintMachine {
   return { key: code, label: `เครื่องพิมพ์ ${number}`, hint: `จากงาน ${job.work_order}` }
 }
 
-function jobToProfile(job: ProductionJob): MachineProfile {
+// ── Lot 2 จังหวะ: "lot ยังไม่ครบ" (69__P1TC00107) → เติม SL# เป็น "lot ครบ" ตอนชั่งสลิต ──
+const SLIT_MACHINES = ['SL1', 'SL2', 'SL3', 'SL4']
+const SLIT_PLACEHOLDER = '__'
+// ตัด token เครื่องสลิต (SL# หรือ __) ออกหลังปี → เหลือ 69P1TC00107
+const stripSlit = (lot: string) => (lot || '').replace(/^(\d{2})(SL\d|_+)/i, '$1')
+// lot ยังไม่ครบ = ใส่ __ แทนเครื่องสลิต (69SL1P1TC00107 หรือ 69P1TC00107 → 69__P1TC00107)
+function toPrintLot(lot: string) {
+  const bare = stripSlit(lot)
+  return bare.length >= 2 ? bare.slice(0, 2) + SLIT_PLACEHOLDER + bare.slice(2) : bare
+}
+// lot ครบ = แทน __/SL# ด้วยเครื่องสลิตจริง (69__P1TC00107 + SL1 → 69SL1P1TC00107)
+function toFullLot(lot: string, slit: string) {
+  const bare = stripSlit(lot)
+  if (bare.length < 2) return bare
+  return bare.slice(0, 2) + (slit || SLIT_PLACEHOLDER) + bare.slice(2)
+}
+
+// printStage=true → ชั่งม้วนพิมพ์ (machine=เครื่องพิมพ์, lot เครื่องพิมพ์)
+// printStage=false → ชั่งม้วนสลิต (machine=เครื่องสลิต, lot ครบ)
+function jobToProfile(job: ProductionJob, opts?: { printStage?: boolean }): MachineProfile {
+  const printStage = opts?.printStage ?? false
+  const printLot = toPrintLot(job.lot_no ?? '')
+  const fullLot = job.slit_machine ? toFullLot(job.lot_no ?? '', job.slit_machine) : printLot
   return {
-    machine_no: job.slit_machine || 'SL1',
+    machine_no: printStage ? (job.print_machine || 'P1') : (job.slit_machine || 'SL1'),
     custCode: job.cust_code ?? '',
     custName: job.customer ?? '',
     custBranch: job.cust_branch ?? '',
@@ -1943,7 +1967,7 @@ function jobToProfile(job: ProductionJob): MachineProfile {
     widthCm: job.width_cm ?? '',
     widthUnit: (job.width_unit ?? 'cm') as 'cm' | 'mm',
     thickMc: job.thick_mc ?? '',
-    lotNo: job.lot_no ?? '',
+    lotNo: printStage ? printLot : fullLot,
     length: job.length ?? '',
     pcs: job.pcs ?? '',
     coreWeight: job.core_weight ?? '1.25',
@@ -1951,7 +1975,7 @@ function jobToProfile(job: ProductionJob): MachineProfile {
     locked: false,
     plannedQty: job.planned_qty ?? '',
     labelSize: 'short',
-    headerText: '',
+    headerText: (job as any).header_text ?? '',   // ชื่อบริษัทบนใบ (งานที่ตั้งชื่อบริษัทอื่น) จากตอนตั้งงาน
     blankHeader: false,
     section: 'print',
     soNo: job.sale_order ?? '',
@@ -1962,10 +1986,34 @@ function jobToProfile(job: ProductionJob): MachineProfile {
   }
 }
 
-function JobPicker({ onSelect }: { onSelect: (profile: MachineProfile, printMachine: PrintMachine) => void }) {
+function JobPicker({ onSelect, printOnly }: { onSelect: (profile: MachineProfile, printMachine: PrintMachine) => void; printOnly?: boolean }) {
   const [jobs, setJobs] = useState<ProductionJob[]>([])
   const [loading, setLoading] = useState(true)
   const [query, setQuery] = useState('')
+  const [slitPickJob, setSlitPickJob] = useState<ProductionJob | null>(null)  // งานที่กำลังเลือกเครื่องสลิต
+  const [savingSlit, setSavingSlit] = useState(false)
+  const [adminGate, setAdminGate] = useState<ProductionJob | null>(null)      // ขอ PIN admin เพื่อเปลี่ยนเครื่องสลิตที่ล็อกแล้ว
+
+  // เข้าชั่ง: ชั่งพิมพ์ = เข้าเลย (lot เครื่องพิมพ์) · ชั่งสลิต = ต้องมีเครื่องสลิต ถ้ายังไม่มีให้เลือกก่อน
+  function pickJob(job: ProductionJob) {
+    if (printOnly) { onSelect(jobToProfile(job, { printStage: true }), printMachineFromJob(job)); return }
+    if (job.slit_machine) { onSelect(jobToProfile(job, { printStage: false }), printMachineFromJob(job)); return }
+    setSlitPickJob(job)   // ยังไม่ล็อกเครื่องสลิต → เปิดให้เลือก
+  }
+
+  // เลือกเครื่องสลิต (ครั้งแรก = ล็อกให้งานนี้ · เปลี่ยนภายหลังต้อง admin)
+  async function assignSlit(job: ProductionJob, slit: string) {
+    setSavingSlit(true)
+    const fullLot = toFullLot(job.lot_no ?? '', slit)
+    const { error } = await supabase.from('production_jobs')
+      .update({ slit_machine: slit, lot_no: fullLot }).eq('id', job.id)
+    setSavingSlit(false)
+    if (error) { alert('บันทึกเครื่องสลิตไม่สำเร็จ: ' + error.message); return }
+    const updated = { ...job, slit_machine: slit, lot_no: fullLot }
+    setJobs(prev => prev.map(j => j.id === job.id ? updated : j))
+    setSlitPickJob(null); setAdminGate(null)
+    onSelect(jobToProfile(updated, { printStage: false }), printMachineFromJob(updated))
+  }
 
   async function reloadJobs() {
     setLoading(true)
@@ -2029,38 +2077,95 @@ function JobPicker({ onSelect }: { onSelect: (profile: MachineProfile, printMach
           </div>
         ) : (
           <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-3">
-            {filtered.map(job => (
-              <button key={job.id} onClick={() => onSelect(jobToProfile(job), printMachineFromJob(job))}
-                className="text-left rounded-2xl border border-slate-800 bg-slate-900 hover:border-brand-500 hover:bg-slate-800/70 p-4 transition-all">
+            {filtered.map(job => {
+              const displayLot = printOnly ? toPrintLot(job.lot_no ?? '') : (job.lot_no ?? '')
+              const slitLocked = !!job.slit_machine
+              return (
+              <div key={job.id} onClick={() => pickJob(job)} role="button" tabIndex={0}
+                className="cursor-pointer text-left rounded-2xl border border-slate-800 bg-slate-900 hover:border-brand-500 hover:bg-slate-800/70 p-4 transition-all">
                 <div className="flex items-start justify-between gap-3">
                   <div>
                     <p className="text-white font-black line-clamp-1">{job.product_name || job.item_code || 'ไม่ระบุสินค้า'}</p>
                     <p className="text-slate-400 text-xs mt-1 line-clamp-1">{job.customer || 'ไม่ระบุลูกค้า'}</p>
                   </div>
                   <span className="shrink-0 text-[10px] bg-emerald-500/15 text-emerald-300 border border-emerald-500/25 px-2 py-1 rounded-full font-bold">
-                    พร้อมชั่ง
+                    {printOnly ? 'ชั่งพิมพ์' : slitLocked ? 'ชั่งสลิต' : 'เลือกสลิต'}
                   </span>
                 </div>
                 <div className="flex flex-wrap gap-1.5 mt-3 text-[10px]">
                   <span className="bg-orange-500/15 text-orange-300 border border-orange-500/25 px-2 py-0.5 rounded font-bold">WO {job.work_order}</span>
                   {job.sale_order && <span className="bg-amber-500/15 text-amber-300 border border-amber-500/25 px-2 py-0.5 rounded font-bold">SO {job.sale_order}</span>}
-                  <span className="bg-slate-800 text-slate-300 border border-slate-700 px-2 py-0.5 rounded font-mono">Lot {job.lot_no}</span>
+                  <span className="bg-slate-800 text-slate-300 border border-slate-700 px-2 py-0.5 rounded font-mono">Lot {displayLot}</span>
                 </div>
                 <div className="grid grid-cols-2 gap-2 mt-3 text-xs">
                   <div className="rounded-lg bg-purple-500/10 border border-purple-500/20 px-2 py-1.5">
                     <p className="text-slate-500 text-[9px]">เครื่องพิมพ์</p>
                     <p className="text-purple-200 font-bold">{job.print_machine || 'P1'}</p>
                   </div>
-                  <div className="rounded-lg bg-blue-500/10 border border-blue-500/20 px-2 py-1.5">
-                    <p className="text-slate-500 text-[9px]">เครื่องสลิท</p>
-                    <p className="text-blue-200 font-bold">{job.slit_machine || 'SL1'}</p>
+                  <div className="rounded-lg bg-blue-500/10 border border-blue-500/20 px-2 py-1.5 flex items-center justify-between">
+                    <div>
+                      <p className="text-slate-500 text-[9px]">เครื่องสลิท</p>
+                      <p className="text-blue-200 font-bold">{job.slit_machine || '— ยังไม่กำหนด —'}</p>
+                    </div>
+                    {!printOnly && slitLocked && (
+                      <button type="button"
+                        onClick={(e) => { e.stopPropagation(); if (isAdminUnlocked()) setSlitPickJob(job); else setAdminGate(job) }}
+                        className="text-[9px] text-amber-300 hover:text-amber-200 border border-amber-500/30 rounded px-1.5 py-0.5">
+                        🔒 เปลี่ยน
+                      </button>
+                    )}
                   </div>
                 </div>
-              </button>
-            ))}
+              </div>
+              )
+            })}
           </div>
         )}
       </div>
+
+      {/* ── เลือกเครื่องสลิต (ครั้งแรก = ล็อกให้งานนี้) ─────────────────── */}
+      {slitPickJob && (
+        <div className="fixed inset-0 z-[60] bg-black/70 flex items-center justify-center p-4" onClick={() => setSlitPickJob(null)}>
+          <div className="bg-slate-900 border border-slate-700 rounded-2xl w-full max-w-md shadow-2xl" onClick={e => e.stopPropagation()}>
+            <div className="px-5 py-4 border-b border-slate-800 flex items-center justify-between">
+              <p className="text-white font-black">เลือกเครื่องสลิต</p>
+              <button onClick={() => setSlitPickJob(null)} className="text-slate-400 hover:text-white text-xl leading-none">×</button>
+            </div>
+            <div className="px-5 py-4 space-y-3">
+              <div className="rounded-xl border border-slate-800 bg-slate-950 px-3 py-2 text-xs">
+                <p className="text-white font-bold">{slitPickJob.product_name || slitPickJob.item_code}</p>
+                <p className="text-slate-500">WO {slitPickJob.work_order} · Lot <span className="font-mono">{toPrintLot(slitPickJob.lot_no ?? '')}</span></p>
+                <p className="text-amber-300/80 mt-1">
+                  {slitPickJob.slit_machine
+                    ? `เครื่องนี้ล็อกเป็น ${slitPickJob.slit_machine} — เปลี่ยนเครื่อง (สิทธิ์ admin)`
+                    : 'เลือกเครื่องแล้ว งานนี้จะล็อกเครื่องสลิตตัวนี้จนจบงาน'}
+                </p>
+              </div>
+              <div className="grid grid-cols-2 gap-2">
+                {SLIT_MACHINES.map(m => (
+                  <button key={m} type="button" disabled={savingSlit} onClick={() => assignSlit(slitPickJob, m)}
+                    className={`py-3 rounded-xl font-black border transition-colors disabled:opacity-40 ${
+                      slitPickJob.slit_machine === m
+                        ? 'bg-blue-600 border-blue-500 text-white'
+                        : 'bg-slate-800 border-slate-700 text-slate-300 hover:border-blue-400 hover:text-white'
+                    }`}>
+                    {m}
+                  </button>
+                ))}
+              </div>
+              <p className="text-[10px] text-slate-500">Lot จะครบเป็น <span className="font-mono text-slate-300">69SL#{'…'}</span> เมื่อเลือกเครื่อง</p>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* ── ขอ PIN admin เพื่อเปลี่ยนเครื่องสลิตที่ล็อกแล้ว ─────────────── */}
+      {adminGate && (
+        <PinGate
+          onUnlock={() => { const j = adminGate; setAdminGate(null); setSlitPickJob(j) }}
+          onClose={() => setAdminGate(null)}
+        />
+      )}
     </div>
   )
 }
@@ -2099,7 +2204,7 @@ function PrintMachinePicker({ onSelect }: { onSelect: (m: PrintMachine) => void 
 }
 
 // ── Weigh Page ────────────────────────────────────────────────────────────────
-function WeighPage({ profile: initialProfile, onBack, asModal, printMachine }: { profile: MachineProfile; onBack: (opts?: { weighed?: boolean }) => void; asModal?: boolean; printMachine?: PrintMachine | null }) {
+function WeighPage({ profile: initialProfile, onBack, asModal, printMachine, printOnly }: { profile: MachineProfile; onBack: (opts?: { weighed?: boolean }) => void; asModal?: boolean; printMachine?: PrintMachine | null; printOnly?: boolean }) {
   // เก็บ profile เป็น state + refresh จาก DB ตอน mount — กันใช้ข้อมูล cached เก่า (เช่น widthUnit ไม่ตรง)
   const [profile, setProfile] = useState<MachineProfile>(initialProfile)
   useEffect(() => {
@@ -2557,7 +2662,8 @@ function WeighPage({ profile: initialProfile, onBack, asModal, printMachine }: {
   useEffect(() => {
     if (profile.section === 'rewind' && weighType === 'bad') setWeighType('good')
   }, [profile.section, isProductionJobFlow, weighType])
-  const [goodMode,     setGoodMode]     = useState<GoodMode>('printed_jumbo')
+  // จอชั่งพิมพ์ (printOnly) เริ่มที่ "ม้วนพิมพ์" · จอชั่งสลิท เริ่มที่ "ม้วนสลิท" (พิมพ์แยกหน้าไปแล้ว)
+  const [goodMode,     setGoodMode]     = useState<GoodMode>(printOnly ? 'printed_jumbo' : 'slit_roll')
   const [selectedInputRollId, setSelectedInputRollId] = useState('')
   // 📦 เบิกม้วนจากกล่อง "ม้วนพักไว้" (เมตรไม่ถึง/แก้ไข/NCR ของสินค้านี้ จาก WO เก่า) มาแก้แล้วชั่งเป็น WO ปัจจุบัน
   const [heldBoxRolls, setHeldBoxRolls] = useState<any[]>([])
@@ -2569,10 +2675,14 @@ function WeighPage({ profile: initialProfile, onBack, asModal, printMachine }: {
     return value === 'printed_jumbo' || value === 'slit_roll' || value === 'short_meter' ? value : 'slit_roll'
   }
   const goodRows = weighedRolls.filter((r:any)=>r?.roll_type==='good')
+  // ม้วนพิมพ์ (สรุปยอดในสเตจนี้) — มาจาก weighedRolls ซึ่งกรองตาม machine+lot ของจอปัจจุบันอยู่แล้ว
   const printedJumboRows = goodRows.filter((r:any) => goodModeOfRoll(r) === 'printed_jumbo')
+  // ม้วนพิมพ์ "ต้นทางให้เลือกตอนชั่งสลิท" — ต้องดึงแยกด้วย job_id เพราะม้วนพิมพ์อยู่คนละ machine/lot
+  // (ชั่งพิมพ์ = machine พิมพ์ + lot พิมพ์ · ชั่งสลิท = machine สลิท + lot ครบ) weighedRolls ของจอสลิทเลยไม่มีม้วนพิมพ์
+  const [printedSourceRolls, setPrintedSourceRolls] = useState<any[]>([])
   // สลิท/เมตรไม่ถึง อ้างอิงม้วนพิมพ์แล้ว (printed_jumbo) เป็นต้นทาง · ม้วนพิมพ์แล้วเป็นขั้นแรก ไม่มีต้นทาง
   const needsSourceRoll = isProductionJobFlow && (goodMode === 'slit_roll' || goodMode === 'short_meter')
-  const sourceRollRows = needsSourceRoll ? printedJumboRows : []
+  const sourceRollRows = needsSourceRoll ? printedSourceRolls : []
   const sourceRollById = new Map(sourceRollRows.map((r:any) => [r.id, r]))
   const selectedInputRoll = selectedInputRollId ? sourceRollById.get(selectedInputRollId) : null
   const withdrawnHeld = withdrawnHeldId ? heldBoxRolls.find((r:any) => r.id === withdrawnHeldId) : null
@@ -2599,6 +2709,20 @@ function WeighPage({ profile: initialProfile, onBack, asModal, printMachine }: {
       .then(({ data }) => { if (alive) setHeldBoxRolls((data ?? [])) })
     return () => { alive = false }
   }, [isProductionJobFlow, (profile as any).jobId, weighedRolls.length])
+  // โหลดม้วนพิมพ์แล้ว (printed_jumbo) ของงานนี้ — ไว้เลือกเป็นต้นทางตอนชั่งสลิท + คำนวณยอดสรุป/yield
+  //   ต้องดึงแยกด้วย job_id เพราะม้วนพิมพ์อยู่คนละ machine_no/lot_no กับจอสลิท (คนละสเตจ)
+  //   โหลดเสมอ (ไม่ผูกกับ goodMode) เพื่อให้ยอดสรุปด้านล่างถูกต้องไม่ว่าจะสลับแท็บไหน
+  useEffect(() => {
+    const jobId = (profile as any).jobId
+    if (!isProductionJobFlow || !jobId) { setPrintedSourceRolls([]); return }
+    let alive = true
+    supabase.from('production_rolls')
+      .select('id, roll_no, weight, item_code, lot_no, work_order')
+      .eq('job_id', jobId).eq('inbound_type', 'printed_jumbo').eq('roll_type', 'good')
+      .order('roll_no', { ascending: true })
+      .then(({ data }) => { if (alive) setPrintedSourceRolls(data ?? []) })
+    return () => { alive = false }
+  }, [isProductionJobFlow, needsSourceRoll, (profile as any).jobId, weighedRolls.length])
   // ม้วนกรอ: ผลิตประเมินว่ากรอได้ (default) หรือ "รอพิจารณา" (ส่งให้ ผจก ตัดสิน)
   const [badMode,      setBadMode]      = useState<BadMode>('rework')
   const [scrapReason,  setScrapReason]  = useState('')
@@ -2712,13 +2836,14 @@ function WeighPage({ profile: initialProfile, onBack, asModal, printMachine }: {
     const goodRollsForNumbering = isProductionJobFlow
       ? goodRolls.filter((r: any) => goodModeOfRoll(r) === goodMode)
       : goodRolls
-    // เป่า: เลขต่อเนื่อง (max+1 — โอนแล้วชั่งต่อไม่ถอยกลับ) · กรอ: เติมเลขที่หาย (gap-fill)
+    // เติมเลขที่ว่างเสมอ (gap-fill) — ม้วนที่โอนออกยังนับอยู่ในเลข (query ไม่กรอง transferred ออก)
+    // ช่องว่างเกิดจากม้วนที่ถูกลบจริงเท่านั้น จึงเติมได้อย่างปลอดภัยทุกแผนก
     if (isRework && (profile as any).newSystem) {
       setRollNo(await nsNextRollNo())
     } else {
-      setRollNo(nextRollNo(goodRollsForNumbering, isRework))
+      setRollNo(nextRollNo(goodRollsForNumbering))
     }
-    setBadRollNo(nextRollNo(badRolls, isRework))
+    setBadRollNo(nextRollNo(badRolls))
   }
 
   useEffect(() => {
@@ -2748,7 +2873,7 @@ function WeighPage({ profile: initialProfile, onBack, asModal, printMachine }: {
   useEffect(() => {
     if (!isProductionJobFlow || isRework) return
     const rollsOfThisMode = weighedRolls.filter((r: any) => r?.roll_type === 'good' && goodModeOfRoll(r) === goodMode)
-    setRollNo(nextRollNo(rollsOfThisMode, false))
+    setRollNo(nextRollNo(rollsOfThisMode))
   }, [goodMode]) // eslint-disable-line react-hooks/exhaustive-deps
 
   function clearAwaiting() {
@@ -2843,7 +2968,8 @@ function WeighPage({ profile: initialProfile, onBack, asModal, printMachine }: {
   const printScrapKg = sumRowsKg(scrapRolls.filter((r:any) => r.roll_type === 'scrap_print_color'))
   const glueScrapKg = sumRowsKg(scrapRolls.filter((r:any) => r.roll_type === 'scrap_glue'))
   const slitSideScrapKg = sumRowsKg(scrapRolls.filter((r:any) => r.roll_type === 'scrap_slit_side'))
-  const printedJumboKg = sumRowsKg(printedJumboRows)
+  // ม้วนพิมพ์อยู่คนละ machine/lot กับจอสลิท → ใช้ยอดที่ดึงตาม job_id (printedSourceRolls) แทน weighedRolls ของจอนี้
+  const printedJumboKg = isProductionJobFlow ? sumRowsKg(printedSourceRolls) : sumRowsKg(printedJumboRows)
   const slitFinishedKg = sumRowsKg(slitFinishedRows)
   const printLossKg = printScrapKg + glueScrapKg
   const slitLossKg = slitSideScrapKg
@@ -3176,6 +3302,8 @@ body{font-family:'Sarabun','Tahoma',sans-serif;font-size:11pt;color:#000;padding
         width_unit:   profile.widthUnit ?? 'cm',
         thick_mc:     profile.thickMc || null,
         inbound_type:  isGood ? goodInboundType : isBad ? badInboundType : scrapSub,
+        // ชื่อบริษัทบนใบ (งานที่ตั้งชื่อบริษัทอื่น) → ใส่เฉพาะเมื่อมีค่า (งานปกติไม่ส่ง key นี้ = ไม่ต้องมีคอลัมน์ก็เซฟได้)
+        ...((profile.headerText || '').trim() ? { header_text: (profile.headerText as string).trim() } : {}),
         rework_status: isBad && badMode !== 'ncr' ? 'pending' : null,
         // ม้วนกรอ "รอ ผจก พิจารณา" → set review_status (ม้วนอื่นเป็น null = ปกติ)
         review_status: (isBad && badMode === 'ncr') ? 'pending_review' : null,
@@ -3200,7 +3328,7 @@ body{font-family:'Sarabun','Tahoma',sans-serif;font-size:11pt;color:#000;padding
           x.roll_type === actualType
           && (isRework || (x.work_order ?? '') === (profile.woNo ?? ''))
           && (!isProductionJobFlow || !isGood || (x.inbound_type ?? '') === (payload.inbound_type ?? '')))
-        const newRollNo = nextRollNo(sameTypeRolls, isRework)
+        const newRollNo = nextRollNo(sameTypeRolls)
         const retryPayload = { ...payload, roll_no: newRollNo }
         const retry = await supabase.from('production_rolls').insert(retryPayload).select().single()
         inserted = retry.data
@@ -3318,12 +3446,12 @@ body{font-family:'Sarabun','Tahoma',sans-serif;font-size:11pt;color:#000;padding
 
       if (isGood) {
         setWeighedKg(prev => parseFloat((prev + saveWeight).toFixed(dec)))
-        // เป่า: เลขต่อเนื่อง (max+1) · กรอ: gap-fill
+        // gap-fill ทุกแผนก (เติมเลขม้วนที่ถูกลบ)
         // ⚠ งานพิมพ์: นับเลขถัดไปเฉพาะสเตจปัจจุบัน (goodMode) ไม่งั้นข้ามสเตจ (slit จะเด้ง #3 แทน #2)
         const newList = [...weighedRolls, data]
         const nextPool = newList.filter((r:any) =>
           r?.roll_type === 'good' && (!isProductionJobFlow || goodModeOfRoll(r) === goodMode))
-        setRollNo(nextRollNo(nextPool, isRework))
+        setRollNo(nextRollNo(nextPool))
         // print fire-and-forget (ไม่ await — ไม่บล็อก save flow)
         if (printLabelsEnabled) printLabel({...profile, length: lengthVal || profile.length, pcs: pcsVal || profile.pcs, inspector, inboundType: goodInboundType ?? '' } as any, rollNo, gross, saveWeight, 'short','good', '', data.id)
         // กรอต่อ: ม้วนต้นทางที่ 2 ถูกรวมเข้าม้วนนี้แล้ว → mark consumed (หลุดจากลิสต์ต้นทาง)
@@ -3610,7 +3738,7 @@ body{font-family:'Sarabun','Tahoma',sans-serif;font-size:11pt;color:#000;padding
             const isHeldTab = isBad || (isGood && goodMode === 'short_meter')
             return (
               <div className={`grid ${profile.section === 'rewind' ? 'grid-cols-2' : 'grid-cols-3'} gap-1.5`}>
-                <button onClick={() => { setWeighType('good'); if (goodMode === 'short_meter') setGoodMode('printed_jumbo') }}
+                <button onClick={() => { setWeighType('good'); if (goodMode === 'short_meter') setGoodMode(printOnly ? 'printed_jumbo' : 'slit_roll') }}
                   className={`py-2.5 rounded-xl text-sm font-bold transition-colors text-center ${isStageTab ? 'bg-brand-600 text-white' : 'bg-slate-800 text-slate-400 hover:text-white'}`}>
                   งานชั่ง
                 </button>
@@ -3628,10 +3756,12 @@ body{font-family:'Sarabun','Tahoma',sans-serif;font-size:11pt;color:#000;padding
             )
           })()}
 
-          {/* สเตจงานชั่ง (ก่อนพิมพ์/หลังพิมพ์/สลิท) — ไม่รวมเมตรไม่ถึง (ย้ายไปช่องม้วนพักไว้) */}
+          {/* สเตจงานชั่ง — โหมดชั่งม้วนพิมพ์แยก: เหลือแค่ "ม้วนพิมพ์" · โหมดปกติ: พิมพ์/สลิท */}
           {isGood && !isRework && goodMode !== 'short_meter' && (
             <div className="grid grid-cols-1 gap-1">
-              {GOOD_MODES.filter(m => m.key !== 'short_meter').map(m => (
+              {GOOD_MODES.filter(m => m.key !== 'short_meter'
+                && (!printOnly || m.key === 'printed_jumbo')
+                && (printOnly || !isProductionJobFlow || m.key !== 'printed_jumbo')).map(m => (
                 <button key={m.key} type="button" onClick={() => setGoodMode(m.key)}
                   className={`text-left rounded-lg px-3 py-2 border transition-colors ${
                     goodMode === m.key
@@ -3645,9 +3775,9 @@ body{font-family:'Sarabun','Tahoma',sans-serif;font-size:11pt;color:#000;padding
             </div>
           )}
 
-          {/* ช่องม้วนพักไว้: แก้ไข / NCR / เมตรไม่ถึง — ทั้ง 3 เก็บเข้ากล่อง "ม้วนพักไว้" */}
+          {/* ช่องม้วนพักไว้: แก้ไข / NCR / เมตรไม่ถึง — โหมดชั่งม้วนพิมพ์แยก ซ่อน "เมตรไม่ถึง" (เป็นขั้นสลิท) */}
           {!isRework && (isBad || (isGood && goodMode === 'short_meter')) && (
-            <div className="grid grid-cols-3 gap-1.5">
+            <div className={`grid ${printOnly ? 'grid-cols-2' : 'grid-cols-3'} gap-1.5`}>
               <button type="button" onClick={() => { setWeighType('bad'); setBadMode('rework') }}
                 className={`py-2 rounded-lg text-xs font-bold border transition-colors ${isBad && badMode === 'rework' ? 'bg-orange-600 border-orange-500 text-white' : 'bg-slate-800 border-slate-700 text-slate-400 hover:text-white'}`}>
                 ม้วนแก้ไข
@@ -3656,10 +3786,12 @@ body{font-family:'Sarabun','Tahoma',sans-serif;font-size:11pt;color:#000;padding
                 className={`py-2 rounded-lg text-xs font-bold border transition-colors ${isBad && badMode === 'ncr' ? 'bg-purple-600 border-purple-500 text-white' : 'bg-slate-800 border-slate-700 text-slate-400 hover:text-white'}`}>
                 NCR
               </button>
-              <button type="button" onClick={() => { setWeighType('good'); setGoodMode('short_meter') }}
-                className={`py-2 rounded-lg text-xs font-bold border transition-colors ${isGood && goodMode === 'short_meter' ? 'bg-cyan-600 border-cyan-500 text-white' : 'bg-slate-800 border-slate-700 text-slate-400 hover:text-white'}`}>
-                เมตรไม่ถึง
-              </button>
+              {!printOnly && (
+                <button type="button" onClick={() => { setWeighType('good'); setGoodMode('short_meter') }}
+                  className={`py-2 rounded-lg text-xs font-bold border transition-colors ${isGood && goodMode === 'short_meter' ? 'bg-cyan-600 border-cyan-500 text-white' : 'bg-slate-800 border-slate-700 text-slate-400 hover:text-white'}`}>
+                  เมตรไม่ถึง
+                </button>
+              )}
             </div>
           )}
 
@@ -4186,7 +4318,7 @@ body{font-family:'Sarabun','Tahoma',sans-serif;font-size:11pt;color:#000;padding
                 <div className="rounded-xl border border-purple-500/25 bg-purple-500/10 px-3 py-2">
                   <p className="text-purple-300 text-[10px] font-bold">ม้วนพิมพ์</p>
                   <p className="text-white font-black text-lg">{fmt(printedJumboKg, dec)} <span className="text-xs text-slate-400">Kgs.</span></p>
-                  <p className="text-slate-500 text-[10px]">{printedJumboRows.length} ม้วน</p>
+                  <p className="text-slate-500 text-[10px]">{(isProductionJobFlow ? printedSourceRolls : printedJumboRows).length} ม้วน</p>
                 </div>
                 <div className="rounded-xl border border-green-500/25 bg-green-500/10 px-3 py-2">
                   <p className="text-green-300 text-[10px] font-bold">ม้วนสลิท</p>
@@ -4694,7 +4826,7 @@ body{font-family:'Sarabun','Tahoma',sans-serif;font-size:11pt;color:#000;padding
   )
 }
 
-export default function WeighStation({ dept, initialJobId }: { dept?: 'blow' | 'print' | 'rewind'; initialJobId?: string }) {
+export default function WeighStation({ dept, initialJobId, printOnly }: { dept?: 'blow' | 'print' | 'rewind'; initialJobId?: string; printOnly?: boolean }) {
   const [selected, setSelected] = useState<MachineProfile | null>(null)
   const [selectedPrintMachine, setSelectedPrintMachine] = useState<PrintMachine | null>(null)
 
@@ -4776,7 +4908,7 @@ export default function WeighStation({ dept, initialJobId }: { dept?: 'blow' | '
     )
   }
   if (dept === 'print' && !selected) {
-    return <JobPicker onSelect={(profile, printMachine) => {
+    return <JobPicker printOnly={printOnly} onSelect={(profile, printMachine) => {
       setSelectedPrintMachine(printMachine)
       setSelected(profile)
     }} />
@@ -4793,5 +4925,5 @@ export default function WeighStation({ dept, initialJobId }: { dept?: 'blow' | '
       />
     )
   }
-  return <WeighPage profile={selected} printMachine={selectedPrintMachine} onBack={() => { setSelected(null); setSelectedPrintMachine(null); reload() }} />
+  return <WeighPage profile={selected} printMachine={selectedPrintMachine} printOnly={printOnly} onBack={() => { setSelected(null); setSelectedPrintMachine(null); reload() }} />
 }
