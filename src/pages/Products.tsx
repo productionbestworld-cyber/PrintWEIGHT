@@ -420,7 +420,14 @@ function CustomerEditModal({ customer, onClose }: { customer: Customer; onClose:
       ? await supabase.from('customers').insert(payload)
       : await supabase.from('customers').update(payload).eq('id', id!)
     setSaving(false)
-    if (error) { alert('บันทึกไม่สำเร็จ: ' + error.message); return }
+    if (error) {
+      if (error.code === '23505' || error.message.includes('duplicate key')) {
+        alert(`รหัสลูกค้า "${c.cust_code}" มีอยู่ในระบบแล้ว — กรุณาใช้รหัสอื่น หรือค้นหารายการเดิมเพื่อแก้ไขแทน`)
+      } else {
+        alert('บันทึกไม่สำเร็จ: ' + error.message)
+      }
+      return
+    }
     onClose()
   }
 
@@ -678,13 +685,34 @@ function ProductEditModal({ product, customers, onClose }: { product: Product; c
   async function save() {
     if (!p.item_code.trim()) { alert('กรุณากรอก Item Code'); return }
     setSaving(true)
-    // strip join-ed fields ก่อนส่ง
-    const { id, cust_name, cust_address, ...payload } = p
+    // สร้าง payload จากคอลัมน์จริงของตาราง products เท่านั้น (allowlist)
+    // — กันคอลัมน์ที่ join มาจาก view products_with_customer (cust_name/cust_address/cust_note) หลุดไปด้วย
+    const payload = {
+      item_code:    p.item_code.trim(),
+      product_code: p.product_code ?? '',
+      product_name: p.product_name ?? '',
+      width_cm:     p.width_cm ?? '',
+      width_unit:   p.width_unit ?? 'cm',
+      thick_mc:     p.thick_mc ?? '',
+      mat_code:     p.mat_code ?? '',
+      core_weight:  p.core_weight ?? '',
+      length:       (p as any).length ?? '',
+      pcs:          (p as any).pcs ?? '',
+      barcode_no:   p.barcode_no ?? '',
+      cust_code:    p.cust_code || null,
+    }
     const { error } = isNew
       ? await supabase.from('products').insert(payload)
-      : await supabase.from('products').update(payload).eq('id', id!)
+      : await supabase.from('products').update(payload).eq('id', p.id!)
     setSaving(false)
-    if (error) { alert('บันทึกไม่สำเร็จ: ' + error.message); return }
+    if (error) {
+      if (error.code === '23505' || error.message.includes('duplicate key')) {
+        alert(`Item Code "${p.item_code}" มีอยู่ในระบบแล้ว — กรุณาใช้รหัสอื่น หรือค้นหารายการเดิมเพื่อแก้ไขแทน`)
+      } else {
+        alert('บันทึกไม่สำเร็จ: ' + error.message)
+      }
+      return
+    }
     onClose()
   }
 
