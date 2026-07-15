@@ -79,9 +79,6 @@ export default function RollDetail() {
 
   const typeLabel  = roll.roll_type === 'good' ? 'FG ✓' : roll.roll_type === 'scrap' ? 'ของเสีย' : 'กรอ/ซ่อม'
   const typeBg     = roll.roll_type === 'good' ? 'bg-brand-700' : roll.roll_type === 'scrap' ? 'bg-red-800' : 'bg-amber-700'
-  // ม้วนกรอ (ผลผลิตจากแผนกกรอ) — ลูกค้าสแกนต้องเห็นเป็นม้วนดีปกติ: ซ่อนหมายเหตุ/ที่มาที่บอกว่าเคยเสีย
-  const isRework   = !!(roll.rework_source_lot || roll.rework_source_roll_id)
-  const showRemark = !isRework && roll.remark && !/🔁|กรอจาก|เหตุผล/.test(String(roll.remark))
 
   return (
     <div className="min-h-screen bg-[#0a0f1e] flex items-center justify-center p-4">
@@ -122,7 +119,6 @@ export default function RollDetail() {
           <Row label="Lot No"      val={roll.lot_no       || '—'} mono />
           <Row label="เครื่องจักร" val={roll.machine_no   || '—'} />
           {roll.inspector && <Row label="ผู้ตรวจสอบ" val={roll.inspector} />}
-          {showRemark     && <Row label="หมายเหตุ"   val={roll.remark} />}
           {/* หาดทิพย์ — โชว์ค่าเพิ่ม: วัสดุ + วันผลิต/วันหมดอายุต่อกัน */}
           {isHadthip && <Row label="HTC Material" val="LDPE" />}
           <Row label="วันที่ผลิต" val={isHadthip ? dateStr : `${dateStr}  ${timeStr}`} />
