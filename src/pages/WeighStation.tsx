@@ -276,16 +276,12 @@ ${savedLayout.fields.map(renderLongField).join('\n')}
     inspector: `ผู้ตรวจ: <b>${p.inspector || '—'}</b>`,
   }
   const renderShortField = makeFieldRenderer(shortFieldData, 56)
-  const shortHtmlFromLayout = `
-<style>
+  const shortHtmlFromLayout = `<style>
 @import url('https://fonts.googleapis.com/css2?family=Sarabun:wght@400;600;700;800;900&display=swap');
 *{box-sizing:border-box;margin:0;padding:0}
-html,body{font-family:'Sarabun','Arial',sans-serif;color:#000;background:#fff;width:${shortLayout.labelW}mm;height:${shortLayout.labelH}mm}
-@media print{@page{size:${shortLayout.labelW}mm ${shortLayout.labelH}mm;margin:0}body{-webkit-print-color-adjust:exact;print-color-adjust:exact}}
-</style>
-<div style="position:relative;width:${shortLayout.labelW}mm;height:${shortLayout.labelH}mm;border:1.5px solid #000;overflow:hidden">
-${shortLayout.fields.map(renderShortField).join('\n')}
-</div>`
+html,body{font-family:'Sarabun','Arial',sans-serif;color:#000;background:#fff;width:${shortLayout.labelW}mm;height:${shortLayout.labelH}mm;overflow:hidden;line-height:0}
+@media print{@page{size:${shortLayout.labelW}mm ${shortLayout.labelH}mm;margin:0}html,body{width:${shortLayout.labelW}mm;height:${shortLayout.labelH}mm;overflow:hidden}body{-webkit-print-color-adjust:exact;print-color-adjust:exact}}
+</style><div style="position:relative;width:${shortLayout.labelW}mm;height:${shortLayout.labelH}mm;border:1.5px solid #000;overflow:hidden;line-height:normal">${shortLayout.fields.map(renderShortField).join('')}</div>`
 
 
   // ═══════════════════════════════════════════════════════
@@ -602,16 +598,12 @@ html,body{font-family:'Sarabun','Arial',sans-serif;color:#000;background:#fff;wi
     footer:   getWasteConst('footer') || 'หมายเหตุ : ห้ามผสมของเสียต่างประเภทกัน และห้ามนำของเสียออกนอกพื้นที่โดยไม่ได้รับอนุญาต',
   }
   const renderWasteField = makeFieldRenderer(wasteFieldData, 72)  // 72px QR
-  const wasteHtmlFromLayout = `
-<style>
+  const wasteHtmlFromLayout = `<style>
 @import url('https://fonts.googleapis.com/css2?family=Sarabun:wght@400;600;700;800;900&display=swap');
 *{box-sizing:border-box;margin:0;padding:0}
-html,body{font-family:'Sarabun','Arial',sans-serif;color:#000;background:#fff;width:${wasteLayout.labelW}mm;height:${wasteLayout.labelH}mm}
-@media print{@page{size:${wasteLayout.labelW}mm ${wasteLayout.labelH}mm;margin:0}body{-webkit-print-color-adjust:exact;print-color-adjust:exact}}
-</style>
-<div style="position:relative;width:${wasteLayout.labelW}mm;height:${wasteLayout.labelH}mm;border:1.5px solid #000;overflow:hidden">
-${wasteLayout.fields.map(renderWasteField).join('\n')}
-</div>`
+html,body{font-family:'Sarabun','Arial',sans-serif;color:#000;background:#fff;width:${wasteLayout.labelW}mm;height:${wasteLayout.labelH}mm;overflow:hidden;line-height:0}
+@media print{@page{size:${wasteLayout.labelW}mm ${wasteLayout.labelH}mm;margin:0}html,body{width:${wasteLayout.labelW}mm;height:${wasteLayout.labelH}mm;overflow:hidden}body{-webkit-print-color-adjust:exact;print-color-adjust:exact}}
+</style><div style="position:relative;width:${wasteLayout.labelW}mm;height:${wasteLayout.labelH}mm;border:1.5px solid #000;overflow:hidden;line-height:normal">${wasteLayout.fields.map(renderWasteField).join('')}</div>`
 
   const W = isScrapRoll ? wasteLayout.labelW : size === 'long' ? savedLayout.labelW : shortLayout.labelW
   const H = isScrapRoll ? wasteLayout.labelH : size === 'long' ? savedLayout.labelH : shortLayout.labelH
@@ -628,9 +620,7 @@ async function printLabel(p: MachineProfile, rollNo: number, gross: number, net:
     alert('⚠ Browser block popup — กรุณาอนุญาต popup ของเว็บนี้\n(ไอคอนล็อค/ขวาบนช่อง URL)\n\nม้วนถูกบันทึกแล้ว สามารถพิมพ์ใหม่ได้จากหน้า History')
     return
   }
-  win.document.write(`<!DOCTYPE html><html><head><meta charset="utf-8"/>
-  ${innerHtml}
-  </head><body><script>
+  win.document.write(`<!DOCTYPE html><html><head><meta charset="utf-8"/></head><body>${innerHtml}<script>
     var imgs=document.images,n=0
     function doPrint(){
       if(document.fonts && document.fonts.ready){
@@ -660,9 +650,9 @@ export async function printRollsBatch(rolls: any[], size: 'long'|'short' = 'shor
   const { W, H } = labels[0]
   const win = window.open('', '_blank', 'width=1000,height=760,menubar=no,toolbar=no')
   if (!win) { alert('⚠ Browser block popup — กรุณาอนุญาต popup ของเว็บนี้แล้วลองใหม่'); return }
-  const body = labels.map(l =>
-    `<div style="page-break-after:always;width:${l.W}mm;height:${l.H}mm;overflow:hidden">${l.innerHtml}</div>`
-  ).join('\n')
+  const body = labels.map((l, i) =>
+    `<div style="${i < labels.length - 1 ? 'page-break-after:always;' : ''}width:${l.W}mm;height:${l.H}mm;overflow:hidden;line-height:normal">${l.innerHtml}</div>`
+  ).join('')
   win.document.write(`<!DOCTYPE html><html><head><meta charset="utf-8"/>
   <style>@page{size:${W}mm ${H}mm;margin:0}@media print{body{-webkit-print-color-adjust:exact;print-color-adjust:exact}}body{margin:0}</style>
   </head><body>${body}<script>
