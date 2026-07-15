@@ -612,6 +612,18 @@ export default function Transfer({ dept }: { dept?: 'blow'|'print'|'rewind' }) {
           </button>
         </div>
 
+        {/* สลับ: โอนงาน ↔ ประวัติการโอน */}
+        <div className="grid grid-cols-2 gap-2">
+          <button onClick={() => setTab('transfer')}
+            className={`py-2.5 rounded-xl text-sm font-bold transition-colors flex items-center justify-center gap-1.5 ${tab === 'transfer' ? 'bg-brand-600 text-white' : 'bg-slate-800 text-slate-400 hover:text-white'}`}>
+            🚚 โอนงาน
+          </button>
+          <button onClick={() => { setTab('history'); loadDocs() }}
+            className={`py-2.5 rounded-xl text-sm font-bold transition-colors flex items-center justify-center gap-1.5 ${tab === 'history' ? 'bg-brand-600 text-white' : 'bg-slate-800 text-slate-400 hover:text-white'}`}>
+            📦 ประวัติการโอน
+          </button>
+        </div>
+
         {tab === 'transfer' && (
           <div className="rounded-2xl border border-brand-500/30 bg-brand-500/10 p-4">
             <p className="text-white font-black">ทำตาม 3 ขั้นตอนนี้</p>
