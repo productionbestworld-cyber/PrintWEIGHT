@@ -279,9 +279,10 @@ ${savedLayout.fields.map(renderLongField).join('\n')}
   const shortHtmlFromLayout = `<style>
 @import url('https://fonts.googleapis.com/css2?family=Sarabun:wght@400;600;700;800;900&display=swap');
 *{box-sizing:border-box;margin:0;padding:0}
-html,body{font-family:'Sarabun','Arial',sans-serif;color:#000;background:#fff;width:${shortLayout.labelW}mm;height:${shortLayout.labelH}mm;overflow:hidden;line-height:0}
-@media print{@page{size:${shortLayout.labelW}mm ${shortLayout.labelH}mm;margin:0}html,body{width:${shortLayout.labelW}mm;height:${shortLayout.labelH}mm;overflow:hidden}body{-webkit-print-color-adjust:exact;print-color-adjust:exact}}
-</style><div style="position:relative;width:${shortLayout.labelW}mm;height:${shortLayout.labelH}mm;border:1.5px solid #000;overflow:hidden;line-height:normal">${shortLayout.fields.map(renderShortField).join('')}</div>`
+html,body{font-family:'Sarabun','Arial',sans-serif;color:#000;background:#fff}
+.bwp-lbl{position:relative;width:${shortLayout.labelW}mm;height:${shortLayout.labelH}mm;border:1.5px solid #000;overflow:hidden}
+@media print{@page{size:${shortLayout.labelW}mm ${shortLayout.labelH}mm;margin:0}html,body{width:${shortLayout.labelW}mm;overflow:hidden;-webkit-print-color-adjust:exact;print-color-adjust:exact}.bwp-lbl{height:calc(${shortLayout.labelH}mm - 2px)}}
+</style><div class="bwp-lbl">${shortLayout.fields.map(renderShortField).join('')}</div>`
 
 
   // ═══════════════════════════════════════════════════════
@@ -601,9 +602,10 @@ html,body{font-family:'Sarabun','Arial',sans-serif;color:#000;background:#fff;wi
   const wasteHtmlFromLayout = `<style>
 @import url('https://fonts.googleapis.com/css2?family=Sarabun:wght@400;600;700;800;900&display=swap');
 *{box-sizing:border-box;margin:0;padding:0}
-html,body{font-family:'Sarabun','Arial',sans-serif;color:#000;background:#fff;width:${wasteLayout.labelW}mm;height:${wasteLayout.labelH}mm;overflow:hidden;line-height:0}
-@media print{@page{size:${wasteLayout.labelW}mm ${wasteLayout.labelH}mm;margin:0}html,body{width:${wasteLayout.labelW}mm;height:${wasteLayout.labelH}mm;overflow:hidden}body{-webkit-print-color-adjust:exact;print-color-adjust:exact}}
-</style><div style="position:relative;width:${wasteLayout.labelW}mm;height:${wasteLayout.labelH}mm;border:1.5px solid #000;overflow:hidden;line-height:normal">${wasteLayout.fields.map(renderWasteField).join('')}</div>`
+html,body{font-family:'Sarabun','Arial',sans-serif;color:#000;background:#fff}
+.bwp-lbl{position:relative;width:${wasteLayout.labelW}mm;height:${wasteLayout.labelH}mm;border:1.5px solid #000;overflow:hidden}
+@media print{@page{size:${wasteLayout.labelW}mm ${wasteLayout.labelH}mm;margin:0}html,body{width:${wasteLayout.labelW}mm;overflow:hidden;-webkit-print-color-adjust:exact;print-color-adjust:exact}.bwp-lbl{height:calc(${wasteLayout.labelH}mm - 2px)}}
+</style><div class="bwp-lbl">${wasteLayout.fields.map(renderWasteField).join('')}</div>`
 
   const W = isScrapRoll ? wasteLayout.labelW : size === 'long' ? savedLayout.labelW : shortLayout.labelW
   const H = isScrapRoll ? wasteLayout.labelH : size === 'long' ? savedLayout.labelH : shortLayout.labelH
