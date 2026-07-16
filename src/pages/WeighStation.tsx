@@ -1978,12 +1978,15 @@ function jobToProfile(job: ProductionJob, opts?: { printStage?: boolean }): Mach
   }
 }
 
+type JobStat = { jumboN: number; jumboKg: number; slitN: number; slitKg: number; scrapN: number; scrapKg: number }
+
 function JobPicker({ onSelect, printOnly }: { onSelect: (profile: MachineProfile, printMachine: PrintMachine) => void; printOnly?: boolean }) {
   const [jobs, setJobs] = useState<ProductionJob[]>([])
   const [loading, setLoading] = useState(true)
   const [query, setQuery] = useState('')
   const [slitPickJob, setSlitPickJob] = useState<ProductionJob | null>(null)  // งานที่กำลังเลือกเครื่องสลิต
   const [savingSlit, setSavingSlit] = useState(false)
+  const [stats, setStats] = useState<Record<string, JobStat>>({})
   const [adminGate, setAdminGate] = useState<ProductionJob | null>(null)      // ขอ PIN admin เพื่อเปลี่ยนเครื่องสลิตที่ล็อกแล้ว
 
   // เข้าชั่ง: ชั่งพิมพ์ = เข้าเลย (lot เครื่องพิมพ์) · ชั่งสลิต = ต้องมีเครื่องสลิต ถ้ายังไม่มีให้เลือกก่อน
@@ -2019,9 +2022,28 @@ function JobPicker({ onSelect, printOnly }: { onSelect: (profile: MachineProfile
       alert('โหลดงานไม่สำเร็จ: ' + error.message)
       setJobs([])
     } else {
-      setJobs((data ?? []) as ProductionJob[])
+      const list = (data ?? []) as ProductionJob[]
+      setJobs(list)
+      loadStats(list.map(j => j.id).filter(Boolean) as string[])
     }
     setLoading(false)
+  }
+
+  // ยอดชั่งต่องาน (จาก production_rolls ผูก job_id) — แยกพิมพ์ / สลิท / เศษ
+  async function loadStats(jobIds: string[]) {
+    if (!jobIds.length) { setStats({}); return }
+    const rows = await fetchAll(() => supabase.from('production_rolls')
+      .select('job_id, roll_type, inbound_type, weight').in('job_id', jobIds))
+    const m: Record<string, JobStat> = {}
+    for (const r of rows as any[]) {
+      const id = r.job_id; if (!id) continue
+      const s = (m[id] ??= { jumboN: 0, jumboKg: 0, slitN: 0, slitKg: 0, scrapN: 0, scrapKg: 0 })
+      const kg = r.weight ?? 0
+      if (r.roll_type === 'good' && r.inbound_type === 'printed_jumbo') { s.jumboN++; s.jumboKg += kg }
+      else if (r.roll_type === 'good' && (r.inbound_type ?? 'slit_roll') === 'slit_roll') { s.slitN++; s.slitKg += kg }
+      else if (typeof r.roll_type === 'string' && r.roll_type.startsWith('scrap')) { s.scrapN++; s.scrapKg += kg }
+    }
+    setStats(m)
   }
 
   useEffect(() => { reloadJobs() }, [])
@@ -2072,6 +2094,7 @@ function JobPicker({ onSelect, printOnly }: { onSelect: (profile: MachineProfile
             {filtered.map(job => {
               const displayLot = printOnly ? toPrintLot(job.lot_no ?? '') : (job.lot_no ?? '')
               const slitLocked = !!job.slit_machine
+              const st = (job.id && stats[job.id]) || null
               return (
               <div key={job.id} onClick={() => pickJob(job)} role="button" tabIndex={0}
                 className="cursor-pointer text-left rounded-2xl border border-slate-800 bg-slate-900 hover:border-brand-500 hover:bg-slate-800/70 p-4 transition-all">
@@ -2107,6 +2130,17 @@ function JobPicker({ onSelect, printOnly }: { onSelect: (profile: MachineProfile
                       </button>
                     )}
                   </div>
+                </div>
+
+                {/* ยอดที่ชั่งไปแล้วของงานนี้ */}
+                <div className="mt-2 pt-2 border-t border-slate-800 flex flex-wrap items-center gap-x-3 gap-y-1 text-[11px]">
+                  {!st || (st.jumboN + st.slitN + st.scrapN === 0) ? (
+                    <span className="text-slate-600">ยังไม่ได้ชั่ง</span>
+                  ) : (<>
+                    <span className="text-purple-300">🖨 พิมพ์ <b className="text-white">{st.jumboN}</b> ม้วน · {fmt(st.jumboKg, 2)} กก.</span>
+                    <span className="text-green-300">✂ สลิท <b className="text-white">{st.slitN}</b> ม้วน · {fmt(st.slitKg, 2)} กก.</span>
+                    {st.scrapN > 0 && <span className="text-amber-300">เศษ {fmt(st.scrapKg, 2)} กก.</span>}
+                  </>)}
                 </div>
               </div>
               )
