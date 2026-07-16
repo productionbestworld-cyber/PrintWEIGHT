@@ -21,29 +21,46 @@ function ToggleRow({
   return (
     <button
       onClick={() => onChange(!enabled)}
-      className={`w-full rounded-3xl border p-5 text-left transition-all ${
-        enabled
-          ? 'border-green-500/50 bg-green-500/10'
-          : 'border-slate-700 bg-slate-900 hover:border-slate-500'
+      className={`w-full rounded-2xl border p-4 text-left transition-all flex items-center justify-between gap-4 ${
+        enabled ? 'border-green-500/40 bg-green-500/10' : 'border-slate-800 bg-slate-900 hover:border-slate-600'
       }`}
     >
-      <div className="flex items-center justify-between gap-4">
-        <div className="flex items-start gap-4">
-          <div className={`rounded-2xl p-3 ${enabled ? 'bg-green-500/20 text-green-300' : 'bg-slate-800 text-slate-400'}`}>
-            {icon}
-          </div>
-          <div>
-            <p className="text-white text-xl font-black">{title}</p>
-            <p className="text-slate-400 text-sm mt-1">{description}</p>
-          </div>
+      <div className="flex items-center gap-3 min-w-0">
+        <div className={`rounded-xl p-2.5 shrink-0 ${enabled ? 'bg-green-500/20 text-green-300' : 'bg-slate-800 text-slate-400'}`}>
+          {icon}
         </div>
-        <div className={`w-16 h-9 rounded-full p-1 transition-colors ${enabled ? 'bg-green-500' : 'bg-slate-700'}`}>
-          <div className={`h-7 w-7 rounded-full bg-white transition-transform ${enabled ? 'translate-x-7' : ''}`} />
+        <div className="min-w-0">
+          <p className="text-white font-bold flex items-center gap-2">
+            {title}
+            <span className={`text-[10px] font-bold px-1.5 py-0.5 rounded-full ${enabled ? 'bg-green-500/20 text-green-300' : 'bg-slate-700 text-slate-400'}`}>
+              {enabled ? 'เปิด' : 'ปิด'}
+            </span>
+          </p>
+          <p className="text-slate-400 text-xs mt-0.5">{description}</p>
         </div>
       </div>
-      <p className={`mt-4 text-sm font-bold ${enabled ? 'text-green-300' : 'text-slate-500'}`}>
-        {enabled ? 'เปิดอยู่' : 'ปิดอยู่'}
-      </p>
+      <div className={`w-14 h-8 rounded-full p-1 shrink-0 transition-colors ${enabled ? 'bg-green-500' : 'bg-slate-700'}`}>
+        <div className={`h-6 w-6 rounded-full bg-white transition-transform ${enabled ? 'translate-x-6' : ''}`} />
+      </div>
+    </button>
+  )
+}
+
+// การ์ดเครื่องมือ (คลังข้อมูล / ออกแบบใบลาเบล)
+function ToolCard({ icon, title, sub, tone, onClick }: {
+  icon: ReactNode; title: string; sub: string; tone: 'cyan' | 'purple'; onClick: () => void
+}) {
+  const tones = {
+    cyan:   { border: 'border-cyan-500/25 hover:border-cyan-400', bg: 'bg-cyan-500/5', chip: 'bg-cyan-500/15 text-cyan-300' },
+    purple: { border: 'border-purple-500/25 hover:border-purple-400', bg: 'bg-purple-500/5', chip: 'bg-purple-500/15 text-purple-300' },
+  }[tone]
+  return (
+    <button onClick={onClick}
+      className={`group rounded-2xl border ${tones.border} ${tones.bg} p-5 text-left transition-all hover:-translate-y-0.5`}>
+      <div className={`w-12 h-12 rounded-2xl flex items-center justify-center ${tones.chip}`}>{icon}</div>
+      <p className="text-white text-lg font-black mt-3">{title}</p>
+      <p className="text-slate-400 text-xs mt-1">{sub}</p>
+      <p className={`text-xs font-bold mt-3 ${tones.chip.split(' ')[1]} opacity-70 group-hover:opacity-100`}>เปิด →</p>
     </button>
   )
 }
@@ -162,45 +179,40 @@ export default function ProductionSettings() {
           </div>
         </div>
 
-        <div className="grid grid-cols-1 gap-4">
-          <ToggleRow
-            title="เฟคจำนวนกิโล"
-            description="เปิดแล้วหน้า ชั่ง จะมีปุ่มสุ่มค่าทดสอบ ใช้ตอนทดลองระบบเท่านั้น"
-            enabled={fakeKgEnabled}
-            onChange={updateFakeKg}
-            icon={<Scale size={28} />}
-          />
-          <ToggleRow
-            title="พิมพ์ใบปะหน้า"
-            description="เปิดแล้วชั่งเสร็จจะพิมพ์ใบปะหน้าอัตโนมัติ ปิดแล้วบันทึกน้ำหนักอย่างเดียว"
-            enabled={printLabelEnabled}
-            onChange={updatePrintLabel}
-            icon={<Printer size={28} />}
-          />
-          <button onClick={() => setShowLabelDesigner(true)}
-            className="w-full rounded-3xl border border-slate-700 bg-slate-900 hover:border-brand-500 p-5 text-left transition-all">
-            <div className="flex items-center gap-4">
-              <div className="rounded-2xl p-3 bg-slate-800 text-brand-300">
-                <FileEdit size={28} />
-              </div>
-              <div>
-                <p className="text-white text-xl font-black">ออกแบบใบลาเบล</p>
-                <p className="text-slate-400 text-sm mt-1">แก้ตำแหน่ง/ฟิลด์ใบปะหน้า (ใบสั้น 76×76) และใบเศษ</p>
-              </div>
-            </div>
-          </button>
-          <button onClick={() => setShowProducts(true)}
-            className="w-full rounded-3xl border border-slate-700 bg-slate-900 hover:border-brand-500 p-5 text-left transition-all">
-            <div className="flex items-center gap-4">
-              <div className="rounded-2xl p-3 bg-slate-800 text-brand-300">
-                <Boxes size={28} />
-              </div>
-              <div>
-                <p className="text-white text-xl font-black">คลังข้อมูล (สินค้า / ลูกค้า)</p>
-                <p className="text-slate-400 text-sm mt-1">เพิ่ม/แก้ไขสินค้า · ตั้ง Barcode No. · นำเข้า Excel</p>
-              </div>
-            </div>
-          </button>
+        {/* เครื่องมือ */}
+        <div className="space-y-3">
+          <p className="text-slate-500 text-xs font-black uppercase tracking-wider px-1">เครื่องมือ</p>
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+            <ToolCard tone="cyan" icon={<Boxes size={24} />}
+              title="คลังข้อมูล (สินค้า / ลูกค้า)"
+              sub="เพิ่ม/แก้ไขสินค้า · ตั้ง Barcode No. · นำเข้า Excel"
+              onClick={() => setShowProducts(true)} />
+            <ToolCard tone="purple" icon={<FileEdit size={24} />}
+              title="ออกแบบใบลาเบล"
+              sub="แก้ตำแหน่ง/ฟิลด์ใบปะหน้า (ใบสั้น 76×76) และใบเศษ"
+              onClick={() => setShowLabelDesigner(true)} />
+          </div>
+        </div>
+
+        {/* ตั้งค่าระบบ */}
+        <div className="space-y-3">
+          <p className="text-slate-500 text-xs font-black uppercase tracking-wider px-1">ตั้งค่าระบบ</p>
+          <div className="space-y-3">
+            <ToggleRow
+              title="พิมพ์ใบปะหน้า"
+              description="เปิดแล้วชั่งเสร็จจะพิมพ์ใบปะหน้าอัตโนมัติ · ปิดแล้วบันทึกน้ำหนักอย่างเดียว"
+              enabled={printLabelEnabled}
+              onChange={updatePrintLabel}
+              icon={<Printer size={24} />}
+            />
+            <ToggleRow
+              title="เฟคจำนวนกิโล"
+              description="เปิดแล้วหน้าชั่งมีปุ่มสุ่มค่าทดสอบ · ใช้ตอนทดลองระบบเท่านั้น"
+              enabled={fakeKgEnabled}
+              onChange={updateFakeKg}
+              icon={<Scale size={24} />}
+            />
+          </div>
         </div>
       </div>
     </div>
