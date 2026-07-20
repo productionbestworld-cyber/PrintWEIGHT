@@ -1,10 +1,16 @@
 // ── เวอร์ชันของแอป (แผนกพิมพ์) ──────────────────────────────
 // อัปเดตเลขนี้ทุกครั้งที่ปล่อยเวอร์ชันใหม่ + เพิ่มรายการใน CHANGELOG ด้านล่าง
-export const APP_VERSION = '1.1.5'
-export const APP_BUILD_DATE = '2026-07-15'
+export const APP_VERSION = '1.1.6'
+export const APP_BUILD_DATE = '2026-07-20'
 
 // รายละเอียดอัปเดต — โชว์ในหน้า About (คลิกเวอร์ชันมุมขวาบน)
 export const CHANGELOG: { version: string; date: string; items: string[] }[] = [
+  {
+    version: '1.1.6', date: '2026-07-20',
+    items: [
+      'แก้เดือนใน Lot เพี้ยน (เช่น ผลิต ก.ค. แต่ Lot ลงท้าย 08) — เดิมเลขเดือน/ปีของ Lot อ้างเวลาของเครื่อง (timezone) ส่วน MFG อ้างเวลาไทยเสมอ ทำให้ไม่ตรงกัน · ตอนนี้ Lot ยึดเวลาไทย (Asia/Bangkok) เหมือน MFG แล้ว',
+    ],
+  },
   {
     version: '1.1.5', date: '2026-07-15',
     items: [

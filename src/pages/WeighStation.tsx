@@ -22,6 +22,12 @@ function thaiDate(d: Date = new Date()) {
   const g = (t: string) => p.find(x => x.type === t)?.value ?? ''
   return `${g('day')}/${g('month')}/${parseInt(g('year')) + 543}`
 }
+// ปี(2หลัก พ.ศ.) + เดือน(2หลัก) ตามเวลาไทยเสมอ — ให้ตรงกับ MFG (thaiDate) กัน lot/เดือนเพี้ยนข้าม timezone
+function thaiYearMonth(d: Date = new Date()): { yy: string; mm: string } {
+  const p = new Intl.DateTimeFormat('en-GB', { timeZone: 'Asia/Bangkok', month: '2-digit', year: 'numeric' }).formatToParts(d)
+  const g = (t: string) => p.find(x => x.type === t)?.value ?? ''
+  return { yy: String((parseInt(g('year')) + 543) % 100).padStart(2, '0'), mm: g('month') }
+}
 function barcodeUrl(text: string, h = 10) {
   return `https://bwipjs-api.metafloor.com/?bcid=code128&text=${encodeURIComponent(text||'0')}&scale=2&height=${h}&includetext`
 }
@@ -34,8 +40,7 @@ function rolloverLotNo(lot: string, machine: string): string {
   const mc = machine.toUpperCase()
   const m = lot.match(new RegExp(`^(\\d{2})${mc}(\\d{4})(\\d{2})$`))
   if (!m) return lot
-  const yy = String((new Date().getFullYear() + 543) % 100).padStart(2, '0')
-  const mm = String(new Date().getMonth() + 1).padStart(2, '0')
+  const { yy, mm } = thaiYearMonth()
   return `${yy}${mc}${m[2]}${mm}`
 }
 
@@ -1436,8 +1441,7 @@ function QuickEditModal({ profile, onClose, onSaved, onParked }: {
 
   // ── helper สร้าง Lot No อัตโนมัติ ──
   function genLotNo(machine: string, custCode: string): string {
-    const yy = String((new Date().getFullYear() + 543) % 100).padStart(2, '0')
-    const mm = String(new Date().getMonth() + 1).padStart(2, '0')
+    const { yy, mm } = thaiYearMonth()
     const mc = (machine ?? '').toUpperCase()
     const cc = (custCode ?? '').replace(/\D/g, '').padStart(4, '0').slice(-4)
     if (!mc || !cc || cc === '0000') return ''
@@ -1446,8 +1450,7 @@ function QuickEditModal({ profile, onClose, onSaved, onParked }: {
   // เช็คว่า lot string ตรงรูปแบบ auto-gen ของเครื่องนี้หรือเปล่า: yy + machine_no + 4digit + mm
   function isAutoLotPattern(lot: string, machine_no: string): boolean {
     if (!lot || !machine_no) return false
-    const yy = String((new Date().getFullYear() + 543) % 100).padStart(2, '0')
-    const mm = String(new Date().getMonth() + 1).padStart(2, '0')
+    const { yy, mm } = thaiYearMonth()
     const re = new RegExp(`^${yy}${machine_no.toUpperCase()}\\d{4}${mm}$`)
     return re.test(lot)
   }
