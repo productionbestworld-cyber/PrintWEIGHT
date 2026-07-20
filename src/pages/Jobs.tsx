@@ -59,12 +59,13 @@ const COMPANY_OPTIONS = [
   { value: 'บริษัท เจ.เอส. อุตสาหกรรมพลาสติก จำกัด', label: 'บริษัท เจ.เอส. อุตสาหกรรมพลาสติก จำกัด (C0013)' },
 ]
 
-function lotYearMonth(dateText?: string) {
-  const date = dateText ? new Date(`${dateText}T00:00:00`) : new Date()
-  const buddhistYear = date.getFullYear() + 543
-  const yy = String(buddhistYear).slice(-2)
-  const mm = String(date.getMonth() + 1).padStart(2, '0')
-  return { yy, mm }
+// เดือน/ปี ใน Lot = เดือน "ผลิตจริง" (วันที่ตั้งงาน) ตามเวลาไทยเสมอ — ให้ตรงกับ MFG บนใบปะหน้า
+// ไม่อิง "วันส่ง" (delivery_date) เพราะวันส่งอาจข้ามเดือนได้ ทำให้ Lot เพี้ยนจากเดือนผลิต
+function lotYearMonth() {
+  const p = new Intl.DateTimeFormat('en-GB', { timeZone: 'Asia/Bangkok', month: '2-digit', year: 'numeric' }).formatToParts(new Date())
+  const g = (t: string) => p.find(x => x.type === t)?.value ?? ''
+  const yy = String((parseInt(g('year')) + 543) % 100).padStart(2, '0')
+  return { yy, mm: g('month') }
 }
 
 function cleanProductCode(code?: string) {
@@ -76,7 +77,7 @@ function cleanProductCode(code?: string) {
 function genLotNo(job: Job) {
   const productCode = cleanProductCode(job.product_code || job.item_code)
   if (!job.print_machine || !productCode) return ''
-  const { yy, mm } = lotYearMonth(job.delivery_date)
+  const { yy, mm } = lotYearMonth()
   const slit = (job.slit_machine || '').trim() || '__'
   return `${yy}${slit}${job.print_machine}${productCode}${mm}`
 }
